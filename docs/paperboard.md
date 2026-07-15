@@ -141,6 +141,11 @@ the relay but deliberately coalesced on screen; for chat or live status,
 two-second visual updates are the practical floor and one-minute updates are
 gentle on the display.
 
+These refreshes call xochitl's Ghostbuster service through the
+`xofm.libs.ghostbuster` QML module. A same-named application signal is not a
+refresh API: AppLoad only connects its `requestFullRefresh` signal for QTFB
+external applications.
+
 ## Portable and desk modes
 
 - **Portable:** let the tablet sleep normally. Output queues at the relay and

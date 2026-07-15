@@ -1,11 +1,11 @@
 import QtQuick 2.15
 import net.asivery.AppLoad 1.0
 import net.asivery.ApploadUtils
+import xofm.libs.ghostbuster 1.0
 
 Rectangle {
     id: root
     color: paper
-    signal requestFullRefresh
     readonly property color ink: "#171713"
     readonly property color paper: "#f1efe6"
     readonly property color muted: "#66645c"
@@ -26,7 +26,7 @@ Rectangle {
     function returnToLauncher() { endpoint.terminate() }
     function fullRefresh() {
         partialChanges = 0; dirtySinceFullRefresh = false; lastFullRefreshAt = Date.now()
-        requestFullRefresh()
+        ghostBuster.forceClearNow("5-finger gesture")
     }
     function visualChanged(weight) {
         partialChanges += weight || 1; dirtySinceFullRefresh = true

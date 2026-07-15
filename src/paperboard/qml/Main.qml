@@ -1,14 +1,13 @@
 import QtQuick 2.15
 import net.asivery.AppLoad 1.0
 import net.asivery.ApploadUtils
+import xofm.libs.ghostbuster 1.0
 
 Rectangle {
     id: root
     color: paper
 
     signal close
-    signal requestFullRefresh
-
     function unloading() {
         endpoint.terminate()
     }
@@ -53,7 +52,7 @@ Rectangle {
         partialChanges = 0
         dirtySinceFullRefresh = false
         lastFullRefreshAt = Date.now()
-        requestFullRefresh()
+        ghostBuster.forceClearNow("5-finger gesture")
     }
 
     function visualChanged(weight) {
