@@ -31,15 +31,17 @@ devices, plugins/extensions, recipes, playlists, scheduler, and APIs. Paperboard
 does not replace it; the relay acts as the Paper Pure display client.
 
 The pinned `deploy/terminus/compose.yml` includes Terminus, PostgreSQL, Valkey,
-its worker, and a Tailscale Serve sidecar. First check the strict prerequisites:
+its worker, and a Tailscale Serve sidecar. First validate the local Docker
+daemon and the deployment features this repository actually uses:
 
 ```bash
 scripts/check-paperboard-host.sh
 ```
 
-Terminus `0.65.0` requires Docker Engine `29.4.2+` and Compose `5.1.2+` in this
-deployment. Do not start it on an older host. Initialize persistent secrets,
-then edit only the private URL and scoped Tailscale auth key in the ignored
+Terminus does not publish a minimum Docker Engine or Compose version. The check
+above therefore tests capabilities and parses both Compose definitions instead
+of imposing an invented version floor. Initialize persistent secrets, then
+edit only the private URL and scoped Tailscale auth key in the ignored
 mode-0600 file:
 
 ```bash
