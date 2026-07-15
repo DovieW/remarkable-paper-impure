@@ -11,3 +11,6 @@ config/*.local
 backups/
 captures/
 
+# Owner-specific tablet, network, and recovery notes. Use PERSONAL.example.md
+# as the public-safe template; PERSONAL.md must remain local.
+PERSONAL.md

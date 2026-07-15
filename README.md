@@ -36,6 +36,8 @@ human-facing walkthrough is [Zero-to-running quickstart](docs/agent-quickstart.m
 - `docs/custom-software.md` — a tested Vellum, Xovi, AppLoad, and KOReader
   example for one exact OS version.
 - `docs/resources.md` — official and community starting points.
+- `PERSONAL.example.md` — template for the ignored local `PERSONAL.md` where
+  each owner records device- and network-specific context.
 
 ## Tested baseline
 
@@ -68,6 +70,8 @@ still on that version. Agents must inspect the connected device before writes.
 - Prefer official documentation, reviewed source, pinned releases, and hashes.
 - Never commit passwords, private keys, device identifiers, LAN addresses,
   account tokens, user documents, or backup data.
+- Put necessary owner-specific operational details in ignored `PERSONAL.md`;
+  keep actual credentials in a password manager, not Markdown.
 - Never assume software for reMarkable 1/2, Paper Pro, or Paper Pro Move works
   on Paper Pure.
 - Every device-changing procedure needs verification and rollback instructions.

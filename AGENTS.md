@@ -45,6 +45,18 @@ If sources disagree, prefer the higher-trust source and tell the user. Browse
 again when versions, URLs, support claims, or release artifacts may have
 changed.
 
+## Private local context
+
+Owner-specific context belongs in the ignored root file `PERSONAL.md`. If it
+does not exist, create it from `PERSONAL.example.md`. Appropriate entries
+include local paths, tablet fingerprints, LAN addresses, MAC addresses, backup
+locations, and recovery-host notes.
+
+Treat `PERSONAL.md` as sensitive even though it must not contain passwords,
+private keys, recovery codes, or broadly privileged tokens. Never force-add
+it, quote its values in public documentation, or expose its contents in chat
+unless the user explicitly requests a particular non-secret value.
+
 ## Zero-to-running workflow
 
 ### 1. Human preparation
