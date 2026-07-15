@@ -4,6 +4,8 @@ import { isIP } from "node:net";
 import sharp from "sharp";
 
 export const MAX_INPUT_BYTES = 12 * 1024 * 1024;
+export const SCREEN_WIDTH = 1872;
+export const SCREEN_HEIGHT = 1404;
 const MAX_PIXELS = 40_000_000;
 
 function privateIpv4(address: string): boolean {
@@ -74,7 +76,7 @@ export async function normalizeImage(input: Buffer): Promise<{ png: Buffer; sha2
   const png = await decoder
     .rotate()
     .flatten({ background: "#f1efe6" })
-    .resize(1404, 1872, { fit: "contain", background: "#f1efe6", withoutEnlargement: false })
+    .resize(SCREEN_WIDTH, SCREEN_HEIGHT, { fit: "contain", background: "#f1efe6", withoutEnlargement: false })
     .grayscale()
     .png({ compressionLevel: 9, colours: 256, dither: 0.8 })
     .toBuffer();

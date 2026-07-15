@@ -88,6 +88,11 @@ that logical space; verify orientation before injecting input. The helper
 creates a temporary `/dev/uinput` touchscreen for one tap or one bounded swipe
 and then destroys it. It does not run a daemon or open a port.
 
+Paperboard itself is landscape-first and may rotate an `1872x1404` canvas
+inside that raw portrait coordinate space. Do not treat Paperboard's visible
+landscape coordinates as `paperctl.sh` tap coordinates; capture and inspect a
+fresh raw screenshot before any input injection.
+
 Screenshot capture uses the Vellum-packaged `rm-shot` Xovi extension and
 message broker. Screenshots default to ignored `captures/`, may contain private
 documents, and require a content review before sharing.

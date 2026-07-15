@@ -28,6 +28,26 @@ remain in ignored mode-0600 files.
 - No background display takeover. The app and relay polling client exist only
   while Paperboard is in the foreground.
 
+The RETURN control calls AppLoad's `terminate()` operation, which kills the
+backend and immediately unloads every Paperboard frontend. It deliberately
+does not also emit the frontend `close` signal: mixing the two lifecycle paths
+can race the permanent unload and allow a resident frontend to relaunch the
+backend later.
+
+## Landscape orientation
+
+Paperboard deliberately uses the Paper Pure's native `1872x1404` landscape
+space. If AppLoad presents a portrait `1404x1872` application surface, the QML
+frontend rotates its complete landscape canvas by 90 degrees. If AppLoad
+already presents a landscape surface, no additional rotation is applied. This
+keeps Paperboard horizontal without changing the stock notebook application's
+orientation behavior.
+
+The relay normalizes uploaded and provider images to `1872x1404` with
+aspect-fit scaling. Landscape sources use the full canvas; portrait sources
+remain uncropped and receive side margins. Agent message and progress cards
+reflow natively in the wider layout.
+
 ## Build and deploy the tablet application
 
 Install the pinned official Paper Pure SDK outside the repository, then build:
@@ -117,6 +137,15 @@ gentle on the display.
 Do not disable the passcode. Paperboard cannot unlock or bypass a locked
 tablet.
 
+## Launch policy
+
+Paperboard is deliberately manual-launch through AppLoad. Do not configure it
+to start on boot or when a card is posted: agent and provider output must queue
+without interrupting notebooks, reading, or the stock interface. RETURN uses
+AppLoad's permanent unload path, so later relay activity cannot relaunch the
+tablet client. Auto sleep is independent of this policy and may remain disabled
+during an owner-approved powered desk deployment.
+
 ## Legacy single-image mode
 
 `scripts/configure-paperboard.sh --from-file FILE` remains supported for a
@@ -139,8 +168,10 @@ dry run before destructive cleanup.
 ## Verified baseline
 
 The complete relay path, message/progress replacement, authenticated image
-delivery, foreground-only queueing, app reopen/catch-up, and tablet screenshot
-rendering were exercised on Paper Pure OS `3.27.3.0`. Hosted TRMNL requires an
+delivery, foreground-only queueing, app reopen/catch-up, and fixed landscape
+rendering were exercised on Paper Pure OS `3.27.3.0`. Both a normalized
+Terminus image and a native agent message were visually verified across the
+horizontal canvas before returning to the stock UI. Hosted TRMNL requires an
 owner BYOD API key and was contract-tested rather than called with a real
 account. Terminus `0.65.0` was also exercised end to end from a private TrueNAS
 SCALE deployment: ambient image delivery, cursor acknowledgement, and a direct

@@ -13,7 +13,18 @@ Rectangle {
         endpoint.terminate()
     }
 
-    readonly property real unit: Math.max(0.65, Math.min(width / 1404, height / 1872))
+    function returnToLauncher() {
+        // AppLoad's terminate() kills the backend and immediately unloads all
+        // frontends. Do not emit close afterward: that races AppLoad's
+        // permanent-unload path and can leave a resident frontend that later
+        // relaunches the backend.
+        endpoint.terminate()
+    }
+
+    // Paperboard is deliberately landscape-first. AppLoad may either expose a
+    // landscape surface or retain the panel's portrait coordinate space. In
+    // the latter case landscapeCanvas rotates the complete UI as one unit.
+    readonly property real unit: Math.max(0.65, Math.min(landscapeCanvas.width / 1872, landscapeCanvas.height / 1404))
     readonly property color ink: "#171713"
     readonly property color paper: "#f1efe6"
     readonly property color muted: "#66645c"
@@ -112,25 +123,32 @@ Rectangle {
         displayMethod: DisplayMethodArea.Content
     }
 
-    Image {
-        id: legacyImage
-        anchors.fill: parent
-        visible: status === Image.Ready && source !== ""
-        fillMode: Image.PreserveAspectFit
-        asynchronous: true
-        cache: false
-        z: 20
-        onStatusChanged: {
-            if (!root.legacyCandidate) return
-            if (status === Image.Ready) endpoint.sendMessage(2, "decoded")
-            else if (status === Image.Error) endpoint.sendMessage(3, "decode failed")
-        }
-    }
-
     Item {
-        id: page
-        anchors.fill: parent
-        anchors.margins: 58 * root.unit
+        id: landscapeCanvas
+        width: root.width >= root.height ? root.width : root.height
+        height: root.width >= root.height ? root.height : root.width
+        anchors.centerIn: parent
+        rotation: root.width >= root.height ? 0 : 90
+
+        Image {
+            id: legacyImage
+            anchors.fill: parent
+            visible: status === Image.Ready && source !== ""
+            fillMode: Image.PreserveAspectFit
+            asynchronous: true
+            cache: false
+            z: 20
+            onStatusChanged: {
+                if (!root.legacyCandidate) return
+                if (status === Image.Ready) endpoint.sendMessage(2, "decoded")
+                else if (status === Image.Error) endpoint.sendMessage(3, "decode failed")
+            }
+        }
+
+        Item {
+            id: page
+            anchors.fill: parent
+            anchors.margins: 58 * root.unit
 
         Row {
             id: masthead
@@ -343,28 +361,29 @@ Rectangle {
                             else if (modelData === "DISMISS" && root.currentCard.id) endpoint.sendMessage(4, root.currentCard.id)
                             else if (modelData === "AMBIENT") root.selectAmbient()
                             else if (modelData === "REFRESH") endpoint.sendMessage(1, "refresh")
-                            else if (modelData === "RETURN") root.close()
+                            else if (modelData === "RETURN") root.returnToLauncher()
                         }
                     }
                 }
             }
         }
-    }
+        }
 
-    Row {
-        anchors.top: parent.top
-        anchors.right: parent.right
-        anchors.margins: 20 * root.unit
-        visible: legacyImage.visible
-        z: 21
-        spacing: 8 * root.unit
-        Repeater {
-            model: ["REFRESH", "RETURN"]
-            Rectangle {
-                required property string modelData
-                width: 150 * root.unit; height: 64 * root.unit; color: paper; border.width: 2 * root.unit; border.color: ink
-                Text { anchors.centerIn: parent; text: modelData; color: ink; font.family: "Noto Mono"; font.pixelSize: 17 * root.unit; font.weight: Font.Bold }
-                MouseArea { anchors.fill: parent; onClicked: modelData === "REFRESH" ? endpoint.sendMessage(1, "refresh") : root.close() }
+        Row {
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.margins: 20 * root.unit
+            visible: legacyImage.visible
+            z: 21
+            spacing: 8 * root.unit
+            Repeater {
+                model: ["REFRESH", "RETURN"]
+                Rectangle {
+                    required property string modelData
+                    width: 150 * root.unit; height: 64 * root.unit; color: paper; border.width: 2 * root.unit; border.color: ink
+                    Text { anchors.centerIn: parent; text: modelData; color: ink; font.family: "Noto Mono"; font.pixelSize: 17 * root.unit; font.weight: Font.Bold }
+                    MouseArea { anchors.fill: parent; onClicked: modelData === "REFRESH" ? endpoint.sendMessage(1, "refresh") : root.returnToLauncher() }
+                }
             }
         }
     }

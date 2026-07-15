@@ -6,7 +6,7 @@ import { cardInputSchema, cardPatchSchema, DEVICE_ID_PATTERN, devicePollQuerySch
 import { z } from "zod";
 import { requireAdmin, requireDevice, requireScope } from "./auth.js";
 import type { RelayConfig } from "./config.js";
-import { MAX_INPUT_BYTES, normalizeImage } from "./images.js";
+import { MAX_INPUT_BYTES, normalizeImage, SCREEN_HEIGHT, SCREEN_WIDTH } from "./images.js";
 import { ProviderManager } from "./providers.js";
 import { Store } from "./store.js";
 
@@ -69,7 +69,7 @@ export function buildServer(config: RelayConfig): RelayServer {
       const path = store.newAssetPath(id);
       writeFileSync(path, normalized.png, { flag: "wx", mode: 0o600 });
       store.putAsset(params.device, id, path, normalized.sha256, new Date(Date.now() + 86_400_000).toISOString());
-      return reply.code(201).send({ id, sha256: normalized.sha256, width: 1404, height: 1872 });
+      return reply.code(201).send({ id, sha256: normalized.sha256, width: SCREEN_WIDTH, height: SCREEN_HEIGHT });
     } catch (error) { return bad(reply, error); }
   });
 

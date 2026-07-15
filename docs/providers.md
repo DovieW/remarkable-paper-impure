@@ -88,6 +88,30 @@ secrets through the TrueNAS secret/configuration boundary; do not paste them
 into chat or commit a rendered compose file. Back up the database and upload
 volumes together before moving the app to another host.
 
+### Add the Paper Pure model
+
+For an initial hands-on setup, create the model in the Terminus UI. The tracked
+browser helper fills the reusable, non-secret Paper Pure rendering values but
+deliberately leaves the final Save action to the operator:
+
+```bash
+clip.exe < tools/terminus/fill-paper-pure-model.js
+```
+
+Open **Models -> New**, open the browser developer console, paste the helper,
+and run it. Review the highlighted form before clicking **Save**. The helper
+uses the Paper Pure's native `1872x1404` landscape space, 16 grayscale levels,
+and no rotation. It selects the 16-gray palette when Terminus has synchronized
+that palette; otherwise it leaves the palette unchanged and reports the omission.
+It does not contain credentials or owner-specific values, so it belongs in the
+repository rather than an ignored temporary-scripts directory.
+
+The repository also includes a reusable landscape operations screen at
+`tools/terminus/paperboard-operations.html`. Create an HTML screen for the
+Paper Pure model, paste that file as its content, and add it to an automatic
+playlist. A 60-second device refresh rate matches Paperboard's provider floor;
+shorter Terminus values do not make Paperboard poll faster.
+
 Configure the provider with the private Tailscale HTTPS URL and pass
 `--allow-private-http`. The option name reflects the most permissive case, but
 it is also the explicit acknowledgement required for any private-address
@@ -127,3 +151,6 @@ Stop without deleting databases or uploads:
 ```bash
 scripts/stop-paperboard-terminus.sh
 ```
+
+See [Terminus backup and migration](terminus-migration.md) before moving the
+deployment between WSL and TrueNAS SCALE.

@@ -69,8 +69,10 @@ test("normalizes uploaded images and protects assets with the device token", asy
   assert.equal(fetched.statusCode, 200);
   assert.equal(fetched.headers["content-type"], "image/png");
   const metadata = await sharp(fetched.rawPayload).metadata();
-  assert.equal(metadata.width, 1404);
-  assert.equal(metadata.height, 1872);
+  assert.equal(uploaded.json().width, 1872);
+  assert.equal(uploaded.json().height, 1404);
+  assert.equal(metadata.width, 1872);
+  assert.equal(metadata.height, 1404);
 });
 
 test("provider credentials are encrypted at rest and only one provider is active", async (context) => {

@@ -1,0 +1,58 @@
+<main class="paperboard-operations">
+  <header>
+    <p class="eyebrow">PAPER PURE / PRIVATE DISPLAY</p>
+    <h1>Paperboard<br>Operations</h1>
+    <p class="lede">A quiet landing page for queued agent output, ambient dashboards, and system status.</p>
+  </header>
+
+  <section class="status-grid" aria-label="System status">
+    <article>
+      <span class="number">01</span>
+      <h2>Terminus</h2>
+      <p>Private, self-hosted ambient screens.</p>
+      <strong>ONLINE</strong>
+    </article>
+    <article>
+      <span class="number">02</span>
+      <h2>Paperboard</h2>
+      <p>Agent cards queue without taking focus.</p>
+      <strong>READY</strong>
+    </article>
+    <article>
+      <span class="number">03</span>
+      <h2>Delivery</h2>
+      <p>Open from AppLoad when output is wanted.</p>
+      <strong>MANUAL</strong>
+    </article>
+  </section>
+
+  <footer>
+    <p>Private tailnet &bull; No Funnel &bull; Loopback-only administration</p>
+    <p class="cadence">AMBIENT CADENCE&nbsp;&nbsp;60 SECONDS</p>
+  </footer>
+</main>
+
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 100%; height: 100%; }
+  body { background: #f4f1e8; color: #111; font-family: Arial, Helvetica, sans-serif; }
+  .paperboard-operations {
+    width: 100%; min-height: 100vh; padding: 92px 108px 72px;
+    display: flex; flex-direction: column; justify-content: space-between;
+    border: 16px solid #111;
+  }
+  header { display: grid; grid-template-columns: 1.1fr .9fr; column-gap: 84px; align-items: end; }
+  .eyebrow { grid-column: 1 / -1; margin: 0 0 28px; font-size: 24px; font-weight: 700; letter-spacing: 8px; }
+  h1 { margin: 0; font-family: Georgia, 'Times New Roman', serif; font-size: 118px; line-height: .88; font-weight: 400; letter-spacing: -5px; }
+  .lede { margin: 0 0 8px; max-width: 620px; font-size: 38px; line-height: 1.22; }
+  .status-grid { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 5px solid #111; border-bottom: 5px solid #111; }
+  article { min-height: 330px; padding: 38px 42px 32px; display: flex; flex-direction: column; }
+  article + article { border-left: 3px solid #111; }
+  .number { font-family: Georgia, 'Times New Roman', serif; font-size: 34px; }
+  h2 { margin: 28px 0 16px; font-size: 42px; }
+  article p { margin: 0; font-size: 27px; line-height: 1.3; }
+  article strong { margin-top: auto; font-size: 25px; letter-spacing: 5px; }
+  footer { display: flex; justify-content: space-between; gap: 40px; font-size: 22px; font-weight: 700; letter-spacing: 1px; }
+  footer p { margin: 0; }
+  .cadence { letter-spacing: 3px; }
+</style>
