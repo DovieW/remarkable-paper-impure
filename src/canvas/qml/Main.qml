@@ -67,6 +67,10 @@ Rectangle {
 
     Timer { id: toastTimer; interval: 2000; onTriggered: { root.toastText = ""; root.visualChanged(1) } }
     Timer {
+        interval: 250; repeat: false; running: true
+        onTriggered: root.fullRefresh()
+    }
+    Timer {
         interval: 300000; repeat: true; running: true
         onTriggered: {
             if (root.dirtySinceFullRefresh && Date.now() - root.lastFullRefreshAt >= interval)

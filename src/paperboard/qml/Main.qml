@@ -180,6 +180,13 @@ Rectangle {
     Timer { id: chromeTimer; interval: 6000; repeat: false; onTriggered: root.hideControls() }
     Timer { id: toastTimer; interval: 2000; repeat: false; onTriggered: { root.toastText = ""; root.visualChanged(1) } }
     Timer {
+        id: startupRefreshTimer
+        interval: 250
+        repeat: false
+        running: true
+        onTriggered: root.fullRefresh()
+    }
+    Timer {
         id: cleanupRefreshTimer
         interval: 300000
         repeat: true

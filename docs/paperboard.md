@@ -128,8 +128,10 @@ integration, use [Agent tools](agent-tools.md).
 
 ## E-ink behavior
 
-Snapshots are applied at most once every two seconds. Image decode requests an
-immediate full refresh. Both Paperboard and Canvas count relay updates,
+Snapshots are applied at most once every two seconds. Paperboard and Canvas
+request a full refresh 250 milliseconds after opening so the first rendered
+frame clears pixels left by AppLoad or the previous application. Image decode
+also requests an immediate full refresh. Both applications count relay updates,
 navigation, chrome, button feedback, and other partial changes, then request a
 cleanup refresh after seven weighted changes. A five-minute timer requests a
 cleanup refresh only when the foreground app has changed since its previous
