@@ -142,5 +142,6 @@ The complete relay path, message/progress replacement, authenticated image
 delivery, foreground-only queueing, app reopen/catch-up, and tablet screenshot
 rendering were exercised on Paper Pure OS `3.27.3.0`. Hosted TRMNL requires an
 owner BYOD API key and was contract-tested rather than called with a real
-account. Terminus is contract-tested; its full stack requires the Docker
-versions in [Providers](providers.md).
+account. Terminus `0.65.0` was also exercised end to end from a private TrueNAS
+SCALE deployment: ambient image delivery, cursor acknowledgement, and a direct
+agent card were all rendered on the tablet. See [Providers](providers.md).

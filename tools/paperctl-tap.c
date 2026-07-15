@@ -83,18 +83,34 @@ static long parse_coordinate(const char *text, int maximum, const char *name)
     return value;
 }
 
+static void emit_position(int device, int x, int y)
+{
+    const int touch_x = (x * TOUCH_MAX_X) / SCREEN_MAX_X;
+    const int touch_y = (y * TOUCH_MAX_Y) / SCREEN_MAX_Y;
+    emit_event(device, EV_ABS, ABS_MT_POSITION_X, touch_x);
+    emit_event(device, EV_ABS, ABS_MT_POSITION_Y, touch_y);
+    emit_event(device, EV_SYN, SYN_REPORT, 0);
+}
+
 int main(int argc, char **argv)
 {
-    if (argc != 3) {
+    if (argc != 3 && argc != 6) {
         fprintf(stderr, "Usage: %s X Y\n", argv[0]);
+        fprintf(stderr, "       %s X1 Y1 X2 Y2 DURATION_MS\n", argv[0]);
         fprintf(stderr, "Coordinates use the 1404x1872 screenshot space.\n");
         return EXIT_FAILURE;
     }
 
-    const int x = (int)parse_coordinate(argv[1], SCREEN_MAX_X, "X");
-    const int y = (int)parse_coordinate(argv[2], SCREEN_MAX_Y, "Y");
-    const int touch_x = (x * TOUCH_MAX_X) / SCREEN_MAX_X;
-    const int touch_y = (y * TOUCH_MAX_Y) / SCREEN_MAX_Y;
+    const int start_x = (int)parse_coordinate(argv[1], SCREEN_MAX_X, "X1");
+    const int start_y = (int)parse_coordinate(argv[2], SCREEN_MAX_Y, "Y1");
+    const bool is_swipe = argc == 6;
+    const int end_x = is_swipe ? (int)parse_coordinate(argv[3], SCREEN_MAX_X, "X2") : start_x;
+    const int end_y = is_swipe ? (int)parse_coordinate(argv[4], SCREEN_MAX_Y, "Y2") : start_y;
+    const long duration = is_swipe ? parse_coordinate(argv[5], 5000, "DURATION_MS") : 100;
+    if (is_swipe && duration < 100) {
+        fprintf(stderr, "paperctl-tap: DURATION_MS must be between 100 and 5000\n");
+        return EXIT_FAILURE;
+    }
     const int device = open("/dev/uinput", O_WRONLY | O_NONBLOCK | O_CLOEXEC);
     if (device < 0) {
         fail("could not open /dev/uinput");
@@ -146,15 +162,25 @@ int main(int argc, char **argv)
     emit_event(device, EV_ABS, ABS_MT_SLOT, 0);
     emit_event(device, EV_ABS, ABS_MT_TRACKING_ID, 1);
     emit_event(device, EV_ABS, ABS_MT_TOUCH_MAJOR, 10);
-    emit_event(device, EV_ABS, ABS_MT_POSITION_X, touch_x);
-    emit_event(device, EV_ABS, ABS_MT_POSITION_Y, touch_y);
+    emit_event(device, EV_ABS, ABS_MT_POSITION_X, (start_x * TOUCH_MAX_X) / SCREEN_MAX_X);
+    emit_event(device, EV_ABS, ABS_MT_POSITION_Y, (start_y * TOUCH_MAX_Y) / SCREEN_MAX_Y);
     emit_event(device, EV_ABS, ABS_MT_TOOL_TYPE, MT_TOOL_FINGER);
     emit_event(device, EV_ABS, ABS_MT_PRESSURE, 100);
     emit_event(device, EV_ABS, ABS_MT_DISTANCE, 0);
     emit_event(device, EV_KEY, BTN_TOUCH, 1);
     emit_event(device, EV_SYN, SYN_REPORT, 0);
 
-    sleep_milliseconds(100);
+    if (is_swipe) {
+        const int steps = 20;
+        for (int step = 1; step <= steps; step++) {
+            const int x = start_x + ((end_x - start_x) * step) / steps;
+            const int y = start_y + ((end_y - start_y) * step) / steps;
+            sleep_milliseconds(duration / steps);
+            emit_position(device, x, y);
+        }
+    } else {
+        sleep_milliseconds(duration);
+    }
 
     emit_event(device, EV_ABS, ABS_MT_SLOT, 0);
     emit_event(device, EV_ABS, ABS_MT_PRESSURE, 0);

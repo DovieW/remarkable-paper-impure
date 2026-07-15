@@ -1,0 +1,99 @@
+name: paperboard-terminus
+
+x-terminus-image: &terminus-image ghcr.io/usetrmnl/terminus:0.65.0@sha256:68541f83f53b68aecee00c5a0b9ffb3a753f42def1a9d17280ed41be9616104e
+x-terminus-environment: &terminus-environment
+  HANAMI_PORT: "2300"
+  API_URI: ${TERMINUS_PUBLIC_URL:-http://localhost:2300}
+  APP_SECRET: ${TERMINUS_APP_SECRET:?set a persistent random secret}
+  DATABASE_URL: postgres://${TERMINUS_DATABASE_USER:-terminus}:${TERMINUS_DATABASE_PASSWORD:?set database password}@database:5432/${TERMINUS_DATABASE_NAME:-terminus_production}
+  KEYVALUE_URL: redis://:${TERMINUS_KEYVALUE_PASSWORD:?set Valkey password}@keyvalue:6379/0
+
+services:
+  init-certificates:
+    image: *terminus-image
+    user: root
+    environment:
+      CERTIFICATE_URLS: ${TERMINUS_CERTIFICATE_URLS:-}
+    volumes:
+      - certificates:/etc/ssl/certs
+    entrypoint: ["/bin/bash", "-c"]
+    command: scripts/docker/install-certificates
+    restart: on-failure:3
+
+  web:
+    image: *terminus-image
+    init: true
+    environment:
+      <<: *terminus-environment
+      APP_SETUP: "true"
+    ports:
+      - "127.0.0.1:${TERMINUS_LOCAL_PORT:-2300}:2300"
+    volumes:
+      - certificates:/etc/ssl/certs
+      - web-fonts:/app/public/fonts
+      - web-fonts:/usr/share/fonts/terminus
+      - web-uploads:/app/public/uploads
+    depends_on:
+      init-certificates: { condition: service_completed_successfully }
+      database: { condition: service_healthy }
+      keyvalue: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:2300/up"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 45s
+    restart: unless-stopped
+    networks: [terminus]
+
+  worker:
+    image: *terminus-image
+    init: true
+    environment: *terminus-environment
+    command: bundle exec sidekiq -r ./config/sidekiq.rb
+    volumes:
+      - certificates:/etc/ssl/certs
+      - web-fonts:/app/public/fonts
+      - web-fonts:/usr/share/fonts/terminus
+      - web-uploads:/app/public/uploads
+    depends_on:
+      web: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [terminus]
+
+  database:
+    image: postgres:18.4-alpine
+    environment:
+      POSTGRES_USER: ${TERMINUS_DATABASE_USER:-terminus}
+      POSTGRES_DB: ${TERMINUS_DATABASE_NAME:-terminus_production}
+      POSTGRES_PASSWORD: ${TERMINUS_DATABASE_PASSWORD:?set database password}
+    volumes: [database-data:/var/lib/postgresql]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username ${TERMINUS_DATABASE_USER:-terminus} --dbname ${TERMINUS_DATABASE_NAME:-terminus_production}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks: [terminus]
+
+  keyvalue:
+    image: valkey/valkey:9-alpine
+    command: ["valkey-server", "--requirepass", "${TERMINUS_KEYVALUE_PASSWORD:?set Valkey password}", "--maxmemory", "512mb", "--maxmemory-policy", "noeviction"]
+    volumes: [keyvalue-data:/data]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a '${TERMINUS_KEYVALUE_PASSWORD}' ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks: [terminus]
+
+networks:
+  terminus:
+
+volumes:
+  database-data:
+  keyvalue-data:
+  web-fonts:
+  web-uploads:
+  certificates:

@@ -21,10 +21,10 @@ test("Terminus adapter uses the TRMNL display contract and creates one ambient f
       assert.equal(request.headers.id, "paper-pure-upstream");
       assert.equal(request.headers["access-token"], "terminus-test-token");
       response.setHeader("content-type", "application/json");
-      response.end(JSON.stringify({ status: 0, image_url: `${baseUrl}/screen.png`, refresh_rate: "60" }));
+      response.end(JSON.stringify({ status: 0, image_url: "http://browser-facing.example/screen.png?frame=1", refresh_rate: "60" }));
       return;
     }
-    if (request.url === "/screen.png") {
+    if (request.url === "/screen.png?frame=1") {
       response.setHeader("content-type", "image/png");
       response.end(image);
       return;

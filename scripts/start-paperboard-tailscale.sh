@@ -48,10 +48,14 @@ while ! test -S "$socket"; do
   test "$tries" -lt 40 || { tail -30 "$runtime/tailscaled.log" >&2; exit 1; }
   sleep 1
 done
-if ! "$binary" --socket="$socket" status >/dev/null 2>&1; then
+if ! "$binary" --socket="$socket" status --json 2>/dev/null | grep -q '"BackendState"[[:space:]]*:[[:space:]]*"Running"'; then
   echo "Complete the one-time Tailscale authentication shown below. This is an external authentication boundary."
   "$binary" --socket="$socket" up --hostname="$hostname"
 fi
-"$binary" --socket="$socket" status
+"$binary" --socket="$socket" status --json 2>/dev/null | grep -q '"BackendState"[[:space:]]*:[[:space:]]*"Running"' || {
+  echo "Tailscale did not reach the Running state." >&2
+  exit 1
+}
+echo "Tailscale is connected (peer details redacted)."
 echo "SOCKS5 proxy ready on loopback port 1055. No kernel routes were changed."
 REMOTE

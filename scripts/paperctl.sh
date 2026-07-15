@@ -15,6 +15,7 @@ Capture and control an unlocked Paper Pure through authenticated SSH.
 Usage:
   paperctl.sh screenshot [LOCAL_PNG]
   paperctl.sh tap X Y
+  paperctl.sh swipe X1 Y1 X2 Y2 [DURATION_MS]
   paperctl.sh status
 
 Tap coordinates use the 1404x1872 screenshot space. This tool deliberately
@@ -56,6 +57,11 @@ REMOTE
   tap)
     (($# == 2)) || die "tap requires X and Y coordinates"
     ssh -o BatchMode=yes "$host" /home/root/.local/bin/paperctl-tap "$1" "$2"
+    ;;
+  swipe)
+    (($# == 4 || $# == 5)) || die "swipe requires X1 Y1 X2 Y2 [DURATION_MS]"
+    duration="${5:-600}"
+    ssh -o BatchMode=yes "$host" /home/root/.local/bin/paperctl-tap "$1" "$2" "$3" "$4" "$duration"
     ;;
   status)
     (($# == 0)) || die "status accepts no arguments"

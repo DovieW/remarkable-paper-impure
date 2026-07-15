@@ -17,6 +17,8 @@ services:
     ports:
       - "127.0.0.1:${PAPERBOARD_LOCAL_PORT:-8787}:8787"
       - "127.0.0.1:${PAPERBOARD_LOCAL_ADMIN_PORT:-8788}:8788"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     secrets:
       - master_key
       - admin_token

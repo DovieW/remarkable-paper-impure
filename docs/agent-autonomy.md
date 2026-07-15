@@ -79,11 +79,14 @@ The repository provides an SSH-only bridge:
 scripts/paperctl.sh status
 scripts/paperctl.sh screenshot
 scripts/paperctl.sh tap X Y
+scripts/paperctl.sh swipe X1 Y1 X2 Y2 600
 ```
 
-The tap coordinates correspond to the `1404x1872` screenshot coordinate
-space. The helper creates a temporary `/dev/uinput` touchscreen for one tap and
-then destroys it. It does not run a daemon or open a port.
+The input coordinates use the `1404x1872` logical screen space. If the tablet
+is physically rotated, raw framebuffer screenshots may be rotated relative to
+that logical space; verify orientation before injecting input. The helper
+creates a temporary `/dev/uinput` touchscreen for one tap or one bounded swipe
+and then destroys it. It does not run a daemon or open a port.
 
 Screenshot capture uses the Vellum-packaged `rm-shot` Xovi extension and
 message broker. Screenshots default to ignored `captures/`, may contain private

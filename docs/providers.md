@@ -10,19 +10,18 @@ hosted plugin, recipe, playlist, and scheduler ecosystem. The relay calls the
 documented `/api/display` endpoint with `ID` and `access-token` headers, fetches
 the returned absolute image URL, and normalizes it for Paper Pure.
 
+In the TRMNL web app, open the BYOD device's settings and copy its device ID
+and Device API Key. Keep both values out of chat and command-line arguments.
+Run the local helper and enter both values at its hidden local prompts:
+
 ```bash
-set -a; . secrets/clients/local-agent.env; set +a
-export PAPERBOARD_ADMIN_TOKEN="$(<secrets/paperboard-admin-token)"
-pnpm paperboard provider set --device paper-pure \
-  --kind trmnl-hosted --base-url https://trmnl.com \
-  --upstream-device EXAMPLE-DEVICE-ID \
-  --access-token 'load-from-your-secret-manager'
-unset PAPERBOARD_ADMIN_TOKEN
+scripts/configure-paperboard-trmnl-hosted.sh
 ```
 
-Avoid putting real tokens on a command line where shell history or process
-inspection can expose them. The explicit command above illustrates fields;
-for real setup, use a temporary private shell or a local secret manager.
+The helper puts the key in a mode-0600 temporary file, sends it through the
+loopback-only Paperboard admin API, and deletes the file. The relay encrypts
+the provider configuration at rest. For non-interactive secret-manager use,
+the underlying CLI accepts `--access-token-file`.
 
 ## Terminus self-hosted
 
@@ -49,6 +48,46 @@ scripts/init-paperboard-terminus.sh
 scripts/start-paperboard-terminus.sh
 ```
 
+For an initial test on the WSL host, keep Terminus on host loopback and avoid a
+second tailnet node entirely:
+
+```bash
+scripts/init-paperboard-terminus.sh
+scripts/start-paperboard-terminus-local.sh
+```
+
+Open `http://localhost:2300`, register the first local administrator, create a
+virtual device and screen, then configure Paperboard without putting its local
+device identifier in shell history or chat:
+
+```bash
+scripts/configure-paperboard-terminus-local.sh
+```
+
+The local stack publishes only the web service on `127.0.0.1`; PostgreSQL and
+Valkey remain on its private Docker network. Its named volumes are retained by
+`scripts/stop-paperboard-terminus-local.sh`, making later backup and migration
+to another WSL or TrueNAS SCALE host possible.
+
+### TrueNAS SCALE with an existing tailnet node
+
+When TrueNAS already runs Tailscale, use the same topology as the local stack:
+
+1. Deploy `deploy/terminus/compose.local.yml` as a TrueNAS Custom App, retaining
+   its named volumes or mapping them to protected datasets.
+2. Keep Terminus bound to host loopback on port `2300`; do not publish its
+   database or Valkey services.
+3. Add a private Tailscale Serve listener that proxies to
+   `http://127.0.0.1:2300`. Keep Funnel disabled.
+4. Set `TERMINUS_PUBLIC_URL` to that private HTTPS Serve URL, then verify both
+   `/up` and `/api/display` through the tailnet before configuring Paperboard.
+
+This avoids creating a second Tailscale identity beside the TrueNAS host and
+keeps Terminus administration private. Enter persistent application/database
+secrets through the TrueNAS secret/configuration boundary; do not paste them
+into chat or commit a rendered compose file. Back up the database and upload
+volumes together before moving the app to another host.
+
 Configure the provider with the private Tailscale HTTPS URL and pass
 `--allow-private-http`. The option name reflects the most permissive case, but
 it is also the explicit acknowledgement required for any private-address
@@ -74,6 +113,14 @@ pnpm paperboard provider set --device paper-pure --kind none
 
 Provider credentials are encrypted at rest. They never go to the tablet; only
 the relay's own device-token-protected normalized image is downloaded there.
+
+## Verified Terminus path
+
+Terminus `0.65.0` was exercised as a TrueNAS SCALE Custom App behind private
+Tailscale Serve. The relay fetched its advertised display image, normalized it,
+the Paper Pure acknowledged the resulting cursor, and a direct urgent agent
+card continued to render alongside the ambient card. No public listener or
+Funnel was used.
 
 Stop without deleting databases or uploads:
 

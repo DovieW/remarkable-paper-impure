@@ -62,7 +62,12 @@ export class ProviderManager {
     if (!response.ok) throw new Error(`display API returned HTTP ${response.status}`);
     const payload = await response.json() as DisplayResponse;
     if (typeof payload.image_url !== "string") throw new Error("display API response omitted image_url");
-    const input = await fetchImage(payload.image_url, undefined, provider.kind === "terminus" && provider.allow_private_http);
+    let imageUrl = payload.image_url;
+    if (provider.kind === "terminus") {
+      const advertised = new URL(payload.image_url);
+      imageUrl = new URL(`${advertised.pathname}${advertised.search}`, `${base}/`).toString();
+    }
+    const input = await fetchImage(imageUrl, undefined, provider.kind === "terminus" && provider.allow_private_http);
     const normalized = await normalizeImage(input);
     const previous = this.store.db.prepare("SELECT sha256 FROM assets WHERE device_id=? ORDER BY created_at DESC LIMIT 1").get(deviceId) as { sha256: string } | undefined;
     if (previous?.sha256 === normalized.sha256) return;

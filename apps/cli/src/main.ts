@@ -46,8 +46,12 @@ async function main(): Promise<void> {
   if (command === "client" && rest[0] === "create") { const { values } = parseArgs({ args: rest.slice(1), options: { id: { type: "string" }, scopes: { type: "string", multiple: true } } }); output(await admin().createClient(required(values.id, "--id"), values.scopes ?? ["cards:write", "cards:clear", "status:read"])); return; }
   if (command === "token" && rest[0] === "rotate") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" } } }); output(await admin().rotateDevice(required(values.device, "--device"))); return; }
   if (command === "provider" && rest[0] === "set") {
-    const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, kind: { type: "string" }, "base-url": { type: "string" }, "upstream-device": { type: "string" }, "access-token": { type: "string" }, "allow-private-http": { type: "boolean" } } });
-    const provider = providerSchema.parse(values.kind === "none" ? { kind: "none" } : { kind: values.kind, base_url: values["base-url"], device_id: values["upstream-device"], access_token: values["access-token"], allow_private_http: values["allow-private-http"] ?? false });
+    const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, kind: { type: "string" }, "base-url": { type: "string" }, "upstream-device": { type: "string" }, "access-token": { type: "string" }, "access-token-file": { type: "string" }, "allow-private-http": { type: "boolean" } } });
+    if (values["access-token"] && values["access-token-file"]) throw new Error("use only one of --access-token or --access-token-file");
+    const accessToken = values["access-token-file"]
+      ? (await readFile(values["access-token-file"], "utf8")).trim()
+      : values["access-token"];
+    const provider = providerSchema.parse(values.kind === "none" ? { kind: "none" } : { kind: values.kind, base_url: values["base-url"], device_id: values["upstream-device"], access_token: accessToken, allow_private_http: values["allow-private-http"] ?? false });
     output(await admin().setProvider(required(values.device, "--device"), provider)); return;
   }
   process.stderr.write("Usage: paperboard <show|update|clear|status|device create|client create|token rotate|provider set> [options]\n");

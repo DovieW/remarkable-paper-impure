@@ -14,5 +14,7 @@ test("encrypts upstream credentials with authenticated encryption", () => {
   const encrypted = encryptSecret("private-value", key);
   assert.notEqual(encrypted, "private-value");
   assert.equal(decryptSecret(encrypted, key), "private-value");
-  assert.throws(() => decryptSecret(`${encrypted.slice(0, -1)}A`, key));
+  const tampered = Buffer.from(encrypted, "base64url");
+  tampered[12] ^= 1;
+  assert.throws(() => decryptSecret(tampered.toString("base64url"), key));
 });
