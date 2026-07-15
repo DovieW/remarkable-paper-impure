@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+if [ -n "${PAPERBOARD_MASTER_KEY_FILE:-}" ]; then
+  PAPERBOARD_MASTER_KEY=$(cat "$PAPERBOARD_MASTER_KEY_FILE")
+  export PAPERBOARD_MASTER_KEY
+  unset PAPERBOARD_MASTER_KEY_FILE
+fi
+if [ -n "${PAPERBOARD_ADMIN_TOKEN_FILE:-}" ]; then
+  PAPERBOARD_ADMIN_TOKEN=$(cat "$PAPERBOARD_ADMIN_TOKEN_FILE")
+  export PAPERBOARD_ADMIN_TOKEN
+  unset PAPERBOARD_ADMIN_TOKEN_FILE
+fi
+
+exec su-exec paperboard:paperboard "$@"

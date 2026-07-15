@@ -21,6 +21,36 @@ This Paper Pure should be treated as a **personal experimental device**:
   on the tablet.
 - Prefer narrowly scoped, read-only credentials for dashboards and services.
 
+## Paperboard threat boundary
+
+Paperboard is private-by-design but not a container for secrets. Cards may be
+visible to anyone holding the unlocked tablet and are stored temporarily in
+the relay database. Do not send passwords, recovery codes, private keys, or
+confidential work content as cards.
+
+- The public relay listener is reachable only over private Tailscale HTTPS and
+  still requires a scoped client or device token.
+- The administration listener is separate and host-loopback-only.
+- Device tokens can poll/ack and act on only their matching device. Agent
+  tokens hold explicit `cards:write`, `cards:clear`, and/or `status:read`
+  scopes. A client scope currently applies to every device on that relay, so
+  use a separate relay when devices have different trust owners.
+- Tokens are generated with high entropy and stored server-side only as
+  hashes. Provisioned plaintext copies are ignored mode-0600 files.
+- Provider credentials are AES-256-GCM encrypted with a separate mounted
+  master key and are never copied to the tablet.
+- Image uploads are size/pixel/type limited, decoded and normalized server-side,
+  and downloaded by the tablet only from its authenticated relay path.
+- Provider fetches reject redirects, URL credentials, private/special address
+  resolution, and plaintext HTTP. Terminus private HTTP is an explicit opt-in
+  for the isolated Docker network only.
+- Markdown allows no raw HTML or embedded images.
+- Delivery logs omit card content and expire after seven days.
+
+Tailscale is transport isolation, not authorization. Use tailnet grants/ACLs
+to restrict the tablet to the relay and never enable Funnel. See
+[Tailscale topology](tailscale.md) and [Relay](relay.md).
+
 ## Required practices
 
 ### Access

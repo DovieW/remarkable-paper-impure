@@ -4,123 +4,105 @@ import net.asivery.ApploadUtils
 
 Rectangle {
     id: root
-
-    color: "#f1efe6"
+    color: paper
 
     signal close
+    signal requestFullRefresh
 
     function unloading() {
-        console.log("paperboard: frontend unloaded")
         endpoint.terminate()
     }
 
-    readonly property real unit: Math.max(0.65, Math.min(width / 1620, height / 2160))
+    readonly property real unit: Math.max(0.65, Math.min(width / 1404, height / 1872))
     readonly property color ink: "#171713"
     readonly property color paper: "#f1efe6"
     readonly property color muted: "#66645c"
-    readonly property color rule: "#292923"
     readonly property color shade: "#dedbd0"
+    readonly property color urgent: "#171713"
 
-    property string clockText: "--:--"
-    property string dateText: ""
-    property string refreshedText: "NOT YET REFRESHED"
-    property int refreshCount: 0
-    property string backendState: "OFFLINE"
-    property string backendDetail: "No dashboard configured"
-    property bool candidatePending: false
+    property var cards: []
+    property int cursor: 0
+    property int currentIndex: 0
+    readonly property var currentCard: cards.length > 0 ? cards[currentIndex] : ({})
+    property string backendState: "CONNECTING"
+    property string backendDetail: "Waiting for the private relay"
+    property string pendingSnapshot: ""
+    property double lastAppliedAt: 0
+    property int changedFrames: 0
+    property bool legacyCandidate: false
 
-    function twoDigits(value) {
-        return value < 10 ? "0" + value : value
+    function applySnapshot(contents) {
+        var previousId = currentCard.id || ""
+        var snapshot
+        try { snapshot = JSON.parse(contents) }
+        catch (error) { backendState = "ERROR"; backendDetail = "Relay returned invalid JSON"; return }
+        cards = snapshot.cards || []
+        cursor = snapshot.cursor || 0
+        currentIndex = 0
+        for (var index = 0; index < cards.length; index++) {
+            if (cards[index].id === previousId) { currentIndex = index; break }
+        }
+        backendState = cards.length > 0 ? "LIVE" : "CLEAR"
+        backendDetail = cards.length > 0 ? cards.length + " queued card" + (cards.length === 1 ? "" : "s") : "No queued output"
+        lastAppliedAt = Date.now()
+        changedFrames += 1
+        if (changedFrames >= 10) { changedFrames = 0; requestFullRefresh() }
     }
 
-    function updateClock(markRefresh) {
-        const now = new Date()
-        clockText = twoDigits(now.getHours()) + ":" + twoDigits(now.getMinutes())
-        dateText = Qt.formatDate(now, "dddd, d MMMM yyyy").toUpperCase()
-        if (markRefresh) {
-            refreshCount += 1
-            refreshedText = "LOCAL REFRESH  " + twoDigits(now.getHours()) + ":" + twoDigits(now.getMinutes())
+    function queueSnapshot(contents) {
+        pendingSnapshot = contents
+        var remaining = 2000 - (Date.now() - lastAppliedAt)
+        if (lastAppliedAt === 0 || remaining <= 0) {
+            snapshotTimer.stop()
+            applySnapshot(pendingSnapshot)
+            pendingSnapshot = ""
+        } else {
+            snapshotTimer.interval = remaining
+            snapshotTimer.restart()
         }
     }
 
-    Component.onCompleted: updateClock(false)
+    function move(delta) {
+        if (cards.length === 0) return
+        currentIndex = (currentIndex + delta + cards.length) % cards.length
+    }
+
+    function selectAmbient() {
+        for (var index = 0; index < cards.length; index++) {
+            if (cards[index].priority === "ambient") { currentIndex = index; return }
+        }
+        backendDetail = "No ambient provider frame is queued"
+    }
+
+    Timer {
+        id: snapshotTimer
+        repeat: false
+        onTriggered: {
+            if (root.pendingSnapshot !== "") root.applySnapshot(root.pendingSnapshot)
+            root.pendingSnapshot = ""
+        }
+    }
 
     AppLoad {
         id: endpoint
         applicationID: "paperboard"
-
         onMessageReceived: (type, contents) => {
             if (type === 101) {
                 root.backendState = contents
-                root.backendDetail = contents === "FETCHING" ? "HTTPS request in progress" : "No dashboard configured"
+                root.backendDetail = contents === "CONNECTED" ? "Private relay connected" : contents
             } else if (type === 102) {
-                root.candidatePending = true
-                dashboardImage.source = "file://" + contents + "?candidate=" + Date.now()
+                root.legacyCandidate = true
+                legacyImage.source = "file://" + contents + "?candidate=" + Date.now()
             } else if (type === 103) {
-                root.candidatePending = false
-                root.backendState = dashboardImage.source !== "" ? "LAST GOOD" : "ERROR"
+                root.backendState = "OFFLINE"
                 root.backendDetail = contents
             } else if (type === 104) {
-                root.candidatePending = false
-                root.backendState = "DISPLAYING"
-                root.backendDetail = "Decoded and atomically cached"
-                dashboardImage.source = "file://" + contents + "?accepted=" + Date.now()
-            }
-        }
-    }
-
-    Image {
-        id: dashboardImage
-        anchors.fill: parent
-        visible: status === Image.Ready && source !== ""
-        fillMode: Image.PreserveAspectFit
-        asynchronous: true
-        cache: false
-        z: 10
-
-        onStatusChanged: {
-            if (!root.candidatePending) return
-            if (status === Image.Ready) endpoint.sendMessage(2, "decoded")
-            else if (status === Image.Error) endpoint.sendMessage(3, "decode failed")
-        }
-    }
-
-    Row {
-        anchors.top: parent.top
-        anchors.right: parent.right
-        anchors.margins: 28 * root.unit
-        height: 82 * root.unit
-        spacing: 12 * root.unit
-        visible: dashboardImage.visible
-        z: 11
-
-        Repeater {
-            model: ["REFRESH", "RETURN"]
-
-            Rectangle {
-                required property string modelData
-                width: 190 * root.unit
-                height: 82 * root.unit
-                color: root.paper
-                border.width: 3 * root.unit
-                border.color: root.ink
-
-                Text {
-                    anchors.centerIn: parent
-                    text: modelData
-                    color: root.ink
-                    font.family: "Noto Mono"
-                    font.pixelSize: 22 * root.unit
-                    font.weight: Font.Bold
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: {
-                        if (modelData === "REFRESH") endpoint.sendMessage(1, "refresh")
-                        else root.close()
-                    }
-                }
+                root.legacyCandidate = false
+                root.backendState = "LEGACY"
+                root.backendDetail = "Verified last-good dashboard"
+                legacyImage.source = "file://" + contents + "?accepted=" + Date.now()
+            } else if (type === 105) {
+                root.queueSnapshot(contents)
             }
         }
     }
@@ -130,283 +112,260 @@ Rectangle {
         displayMethod: DisplayMethodArea.Content
     }
 
+    Image {
+        id: legacyImage
+        anchors.fill: parent
+        visible: status === Image.Ready && source !== ""
+        fillMode: Image.PreserveAspectFit
+        asynchronous: true
+        cache: false
+        z: 20
+        onStatusChanged: {
+            if (!root.legacyCandidate) return
+            if (status === Image.Ready) endpoint.sendMessage(2, "decoded")
+            else if (status === Image.Error) endpoint.sendMessage(3, "decode failed")
+        }
+    }
+
     Item {
         id: page
         anchors.fill: parent
-        anchors.margins: 76 * root.unit
+        anchors.margins: 58 * root.unit
 
         Row {
             id: masthead
             width: parent.width
-            height: 82 * root.unit
-            spacing: 20 * root.unit
+            height: 68 * root.unit
+            spacing: 18 * root.unit
 
             Text {
                 text: "PAPERBOARD"
-                color: root.ink
+                color: ink
                 font.family: "Noto Mono"
-                font.pixelSize: 31 * root.unit
-                font.letterSpacing: 4 * root.unit
+                font.pixelSize: 25 * root.unit
+                font.letterSpacing: 3 * root.unit
                 font.weight: Font.Bold
                 anchors.verticalCenter: parent.verticalCenter
             }
-
-            Rectangle {
-                width: 12 * root.unit
-                height: 12 * root.unit
-                radius: width / 2
-                color: root.ink
-                anchors.verticalCenter: parent.verticalCenter
-            }
-
+            Rectangle { width: 9 * root.unit; height: 9 * root.unit; radius: width / 2; color: backendState === "LIVE" ? ink : muted; anchors.verticalCenter: parent.verticalCenter }
             Text {
-                text: "SECURE IMAGE DISPLAY"
-                color: root.muted
+                text: backendState
+                color: muted
                 font.family: "Noto Mono"
-                font.pixelSize: 22 * root.unit
+                font.pixelSize: 18 * root.unit
                 font.letterSpacing: 2 * root.unit
                 anchors.verticalCenter: parent.verticalCenter
             }
+            Item { width: Math.max(0, masthead.width - 640 * root.unit); height: 1 }
+            Text {
+                text: cards.length > 0 ? (currentIndex + 1) + " / " + cards.length : "0 / 0"
+                color: ink
+                font.family: "Noto Mono"
+                font.pixelSize: 20 * root.unit
+                font.weight: Font.Bold
+                anchors.verticalCenter: parent.verticalCenter
+            }
         }
 
-        Rectangle {
-            id: topRule
-            anchors.top: masthead.bottom
-            width: parent.width
-            height: 4 * root.unit
-            color: root.rule
-        }
+        Rectangle { id: topRule; anchors.top: masthead.bottom; width: parent.width; height: 3 * root.unit; color: ink }
 
         Item {
-            id: hero
+            id: content
             anchors.top: topRule.bottom
+            anchors.bottom: statusRule.top
             width: parent.width
-            height: 660 * root.unit
-
-            Text {
-                id: clock
-                anchors.left: parent.left
-                anchors.top: parent.top
-                anchors.topMargin: 65 * root.unit
-                text: root.clockText
-                color: root.ink
-                font.family: "EB Garamond"
-                font.pixelSize: 300 * root.unit
-                font.weight: Font.Medium
-                font.letterSpacing: -8 * root.unit
-            }
-
-            Text {
-                anchors.left: parent.left
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: 62 * root.unit
-                text: root.dateText
-                color: root.ink
-                font.family: "Noto Mono"
-                font.pixelSize: 30 * root.unit
-                font.letterSpacing: 2 * root.unit
-            }
 
             Column {
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: 62 * root.unit
-                spacing: 10 * root.unit
+                anchors.fill: parent
+                anchors.topMargin: 64 * root.unit
+                anchors.bottomMargin: 45 * root.unit
+                visible: cards.length === 0
+                spacing: 34 * root.unit
 
                 Text {
-                    anchors.right: parent.right
-                    text: "PAPER PURE"
-                    color: root.ink
+                    text: "The board is clear."
+                    color: ink
+                    font.family: "EB Garamond"
+                    font.pixelSize: 106 * root.unit
+                    font.weight: Font.Medium
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                }
+                Rectangle { width: 110 * root.unit; height: 8 * root.unit; color: ink }
+                Text {
+                    text: "OUTPUT ARRIVES HERE WITHOUT INTERRUPTING NOTEBOOKS OR READING.\nOPEN PAPERBOARD WHEN YOU ARE READY TO RECEIVE IT."
+                    color: muted
                     font.family: "Noto Mono"
-                    font.pixelSize: 25 * root.unit
+                    font.pixelSize: 24 * root.unit
+                    font.letterSpacing: 1 * root.unit
+                    lineHeight: 1.45
+                    width: parent.width * 0.78
+                    wrapMode: Text.WordWrap
+                }
+            }
+
+            Item {
+                anchors.fill: parent
+                anchors.topMargin: 48 * root.unit
+                anchors.bottomMargin: 32 * root.unit
+                visible: cards.length > 0 && currentCard.kind !== "image"
+
+                Text {
+                    id: eyebrow
+                    anchors.top: parent.top
+                    width: parent.width
+                    text: (currentCard.priority || "normal").toUpperCase() + "  ·  " + (currentCard.kind || "message").toUpperCase() + (currentCard.pinned ? "  ·  PINNED" : "")
+                    color: muted
+                    font.family: "Noto Mono"
+                    font.pixelSize: 20 * root.unit
+                    font.letterSpacing: 2 * root.unit
                     font.weight: Font.Bold
                 }
-
                 Text {
-                    anchors.right: parent.right
-                    text: Math.round(root.width) + " × " + Math.round(root.height)
-                    color: root.muted
-                    font.family: "Noto Mono"
-                    font.pixelSize: 22 * root.unit
+                    id: title
+                    anchors.top: eyebrow.bottom
+                    anchors.topMargin: 34 * root.unit
+                    width: parent.width
+                    text: currentCard.title || "Untitled"
+                    color: ink
+                    font.family: "EB Garamond"
+                    font.pixelSize: Math.max(66 * root.unit, Math.min(118 * root.unit, 1500 * root.unit / Math.max(12, text.length)))
+                    font.weight: Font.Medium
+                    wrapMode: Text.WordWrap
+                    maximumLineCount: 3
+                    elide: Text.ElideRight
+                }
+                Rectangle {
+                    id: progressTrack
+                    anchors.top: title.bottom
+                    anchors.topMargin: 36 * root.unit
+                    width: parent.width
+                    height: 30 * root.unit
+                    color: shade
+                    visible: currentCard.kind === "progress"
+                    Rectangle { width: parent.width * Math.max(0, Math.min(100, currentCard.progress || 0)) / 100; height: parent.height; color: ink }
+                }
+                Text {
+                    anchors.top: progressTrack.visible ? progressTrack.bottom : title.bottom
+                    anchors.topMargin: 44 * root.unit
+                    anchors.bottom: parent.bottom
+                    width: parent.width
+                    text: currentCard.body || ""
+                    textFormat: Text.MarkdownText
+                    color: ink
+                    font.family: "EB Garamond"
+                    font.pixelSize: 38 * root.unit
+                    lineHeight: 1.22
+                    wrapMode: Text.WordWrap
+                    elide: Text.ElideRight
+                }
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                visible: cards.length > 0 && currentCard.kind === "image"
+                color: paper
+            }
+
+            Image {
+                id: cardImage
+                anchors.fill: parent
+                anchors.margins: 18 * root.unit
+                visible: cards.length > 0 && currentCard.kind === "image" && currentCard.asset_path !== undefined
+                source: visible ? "file://" + currentCard.asset_path + "?cursor=" + cursor : ""
+                fillMode: Image.PreserveAspectFit
+                asynchronous: true
+                cache: false
+                smooth: false
+                onStatusChanged: {
+                    if (status === Image.Ready) root.requestFullRefresh()
                 }
             }
         }
 
-        Rectangle {
-            id: heroRule
-            anchors.top: hero.bottom
+        Rectangle { id: statusRule; anchors.bottom: statusBar.top; width: parent.width; height: 2 * root.unit; color: ink }
+
+        Row {
+            id: statusBar
+            anchors.bottom: controls.top
             width: parent.width
-            height: 2 * root.unit
-            color: root.rule
+            height: 62 * root.unit
+            spacing: 18 * root.unit
+            Text {
+                text: backendDetail.toUpperCase()
+                color: muted
+                width: parent.width - 240 * root.unit
+                elide: Text.ElideRight
+                anchors.verticalCenter: parent.verticalCenter
+                font.family: "Noto Mono"
+                font.pixelSize: 16 * root.unit
+                font.letterSpacing: 1 * root.unit
+            }
+            Text {
+                text: "CURSOR " + cursor
+                color: muted
+                anchors.verticalCenter: parent.verticalCenter
+                font.family: "Noto Mono"
+                font.pixelSize: 16 * root.unit
+            }
         }
 
         Row {
-            id: panels
-            anchors.top: heroRule.bottom
-            anchors.topMargin: 45 * root.unit
+            id: controls
+            anchors.bottom: parent.bottom
             width: parent.width
-            height: 610 * root.unit
-            spacing: 30 * root.unit
+            height: 82 * root.unit
+            spacing: 9 * root.unit
 
             Repeater {
-                model: [
-                    {
-                        number: "01",
-                        title: "DISPLAY",
-                        value: "READY",
-                        detail: "Qt Quick surface\nAppLoad foreground"
-                    },
-                    {
-                        number: "02",
-                        title: "NETWORK",
-                        value: root.backendState,
-                        detail: root.backendDetail
-                    },
-                    {
-                        number: "03",
-                        title: "CACHE",
-                        value: "ARMED",
-                        detail: "Decode before accept\nAtomic last-good image"
-                    }
-                ]
-
+                model: ["PREV", "NEXT", "PIN", "DISMISS", "AMBIENT", "REFRESH", "RETURN"]
                 Rectangle {
-                    required property var modelData
-                    required property int index
-                    width: (panels.width - 2 * panels.spacing) / 3
-                    height: panels.height
-                    color: index === 0 ? root.ink : root.paper
-                    border.width: index === 0 ? 0 : 2 * root.unit
-                    border.color: root.rule
-
+                    required property string modelData
+                    width: (controls.width - controls.spacing * 6) / 7
+                    height: controls.height
+                    color: modelData === "DISMISS" ? ink : paper
+                    border.width: 2 * root.unit
+                    border.color: ink
                     Text {
-                        anchors.left: parent.left
-                        anchors.top: parent.top
-                        anchors.margins: 30 * root.unit
-                        text: modelData.number
-                        color: index === 0 ? root.paper : root.muted
+                        anchors.centerIn: parent
+                        text: modelData
+                        color: modelData === "DISMISS" ? paper : ink
                         font.family: "Noto Mono"
-                        font.pixelSize: 23 * root.unit
-                    }
-
-                    Text {
-                        anchors.left: parent.left
-                        anchors.top: parent.top
-                        anchors.topMargin: 165 * root.unit
-                        anchors.leftMargin: 30 * root.unit
-                        text: modelData.title
-                        color: index === 0 ? root.paper : root.ink
-                        font.family: "Noto Mono"
-                        font.pixelSize: 24 * root.unit
-                        font.letterSpacing: 2 * root.unit
-                    }
-
-                    Text {
-                        anchors.left: parent.left
-                        anchors.top: parent.top
-                        anchors.topMargin: 220 * root.unit
-                        anchors.leftMargin: 30 * root.unit
-                        text: modelData.value
-                        color: index === 0 ? root.paper : root.ink
-                        font.family: "EB Garamond"
-                        font.pixelSize: 48 * root.unit
+                        font.pixelSize: 15 * root.unit
                         font.weight: Font.Bold
                     }
-
-                    Text {
-                        anchors.left: parent.left
-                        anchors.bottom: parent.bottom
-                        anchors.margins: 30 * root.unit
-                        text: modelData.detail
-                        color: index === 0 ? root.shade : root.muted
-                        font.family: "Noto Sans"
-                        font.pixelSize: 23 * root.unit
-                        lineHeight: 1.35
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            if (modelData === "PREV") root.move(-1)
+                            else if (modelData === "NEXT") root.move(1)
+                            else if (modelData === "PIN" && root.currentCard.id) endpoint.sendMessage(5, root.currentCard.id)
+                            else if (modelData === "DISMISS" && root.currentCard.id) endpoint.sendMessage(4, root.currentCard.id)
+                            else if (modelData === "AMBIENT") root.selectAmbient()
+                            else if (modelData === "REFRESH") endpoint.sendMessage(1, "refresh")
+                            else if (modelData === "RETURN") root.close()
+                        }
                     }
                 }
             }
         }
+    }
 
-        Item {
-            id: controls
-            anchors.top: panels.bottom
-            anchors.topMargin: 70 * root.unit
-            width: parent.width
-            height: 150 * root.unit
-
+    Row {
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.margins: 20 * root.unit
+        visible: legacyImage.visible
+        z: 21
+        spacing: 8 * root.unit
+        Repeater {
+            model: ["REFRESH", "RETURN"]
             Rectangle {
-                id: refreshButton
-                anchors.left: parent.left
-                width: 445 * root.unit
-                height: parent.height
-                color: refreshArea.pressed ? root.shade : root.paper
-                border.width: 3 * root.unit
-                border.color: root.rule
-
-                Text {
-                    anchors.centerIn: parent
-                    text: "REFRESH PROOF"
-                    color: root.ink
-                    font.family: "Noto Mono"
-                    font.pixelSize: 25 * root.unit
-                    font.weight: Font.Bold
-                    font.letterSpacing: 1 * root.unit
-                }
-
-                MouseArea {
-                    id: refreshArea
-                    anchors.fill: parent
-                    onClicked: {
-                        root.updateClock(true)
-                        endpoint.sendMessage(1, "refresh")
-                    }
-                }
+                required property string modelData
+                width: 150 * root.unit; height: 64 * root.unit; color: paper; border.width: 2 * root.unit; border.color: ink
+                Text { anchors.centerIn: parent; text: modelData; color: ink; font.family: "Noto Mono"; font.pixelSize: 17 * root.unit; font.weight: Font.Bold }
+                MouseArea { anchors.fill: parent; onClicked: modelData === "REFRESH" ? endpoint.sendMessage(1, "refresh") : root.close() }
             }
-
-            Text {
-                anchors.left: refreshButton.right
-                anchors.leftMargin: 35 * root.unit
-                anchors.verticalCenter: parent.verticalCenter
-                text: root.refreshedText
-                color: root.muted
-                font.family: "Noto Mono"
-                font.pixelSize: 21 * root.unit
-            }
-
-            Rectangle {
-                anchors.right: parent.right
-                width: 285 * root.unit
-                height: parent.height
-                color: returnArea.pressed ? root.ink : root.paper
-                border.width: 3 * root.unit
-                border.color: root.rule
-
-                Text {
-                    anchors.centerIn: parent
-                    text: "RETURN"
-                    color: returnArea.pressed ? root.paper : root.ink
-                    font.family: "Noto Mono"
-                    font.pixelSize: 25 * root.unit
-                    font.weight: Font.Bold
-                    font.letterSpacing: 2 * root.unit
-                }
-
-                MouseArea {
-                    id: returnArea
-                    anchors.fill: parent
-                    onClicked: root.close()
-                }
-            }
-        }
-
-        Text {
-            anchors.left: parent.left
-            anchors.bottom: parent.bottom
-            text: "MILESTONE 02  /  HTTPS FETCH  /  ON-DEMAND BACKEND"
-            color: root.muted
-            font.family: "Noto Mono"
-            font.pixelSize: 19 * root.unit
-            font.letterSpacing: 1 * root.unit
         }
     }
 }

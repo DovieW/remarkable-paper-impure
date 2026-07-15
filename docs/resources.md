@@ -50,6 +50,32 @@ verified on this Paper Pure with reMarkable OS `3.27.3.0`. Treat that as a
 specific compatibility result, not a guarantee for other KOReader or OS
 versions.
 
+## Paperboard integrations
+
+### [TRMNL Display API](https://docs.trmnl.com/go/private-api/screens)
+
+The official hosted BYOD display contract used by Paperboard's TRMNL provider.
+It documents the `access-token` request header and returned `image_url` and
+`refresh_rate` fields.
+
+### [Terminus](https://github.com/usetrmnl/terminus)
+
+TRMNL's flagship open-source BYOS server. It supplies dashboard management,
+devices, recipes/extensions, playlists, scheduling, and a compatible Display
+API. Treat releases below 1.0 as capable of operational changes and review
+upgrade notes before moving the pinned deployment.
+
+### [Tailscale userspace networking](https://tailscale.com/docs/concepts/userspace-networking)
+
+Official reference for the no-kernel-route SOCKS5 mode used on the tablet and
+by container sidecars.
+
+### [Model Context Protocol TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk)
+
+The official SDK used for Paperboard's generic stdio agent server. MCP is only
+the local tool transport; relay bearer tokens and Tailscale still enforce the
+network/application boundary.
+
 ## How to evaluate a new resource
 
 When adding another link, record:

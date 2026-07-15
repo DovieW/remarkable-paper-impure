@@ -38,8 +38,11 @@ human-facing walkthrough is [Zero-to-running quickstart](docs/agent-quickstart.m
 - `docs/resources.md` — official and community starting points.
 - `docs/agent-autonomy.md` — rules and tooling for agents to launch, observe,
   and verify work themselves while preserving authentication boundaries.
-- `docs/paperboard.md` — build, deploy, and verification guide for the first
-  custom AppLoad dashboard application.
+- `docs/paperboard.md` — the private output queue and Paper Pure application.
+- `docs/relay.md` — hardened relay deployment for WSL/Windows or Linux.
+- `docs/agent-tools.md` — generic CLI and MCP tools for any AI agent.
+- `docs/providers.md` — TRMNL Hosted BYOD and Terminus integration.
+- `docs/tailscale.md` — private connectivity and tested topology.
 - `scripts/configure-paperboard.sh` and `scripts/remove-paperboard.sh` — private
   URL configuration and reversible removal for Paperboard.
 - `PERSONAL.example.md` — template for the ignored local `PERSONAL.md` where
@@ -74,9 +77,22 @@ still on that version. Agents must inspect the connected device before writes.
 ## Paperboard
 
 The first repository-native application is [Paperboard](docs/paperboard.md), a
-full-screen Qt Quick dashboard for AppLoad. It includes an on-demand ARM64
-backend with verified HTTPS-only PNG fetching, decode-before-acceptance, and an
-atomic private last-good cache on Paper Pure OS `3.27.x`.
+private output queue for agents and ambient dashboards. Its AppLoad UI renders
+messages, progress, and authenticated images; a hardened relay supports CLI,
+MCP, TRMNL Hosted BYOD, and self-hosted Terminus. Delivery never launches the
+app or interrupts notebooks—queued output appears when the owner opens it.
+
+For the tested WSL setup where Windows is already on the tailnet, start with:
+
+```bash
+pnpm install --frozen-lockfile
+scripts/init-paperboard-relay.sh
+scripts/start-paperboard-relay-windows.sh
+```
+
+Then follow [Paperboard](docs/paperboard.md) for tablet Tailscale, provisioning,
+deployment, and a first card. Secrets and private hostnames live only under
+ignored `secrets/` and `deploy/*/.env` files.
 
 ## Project rules
 

@@ -70,10 +70,12 @@ cp "$REPOSITORY_ROOT/src/paperboard/packaging/manifest.json" \
   "$build_directory/manifest.json"
 mkdir -p "$build_directory/backend"
 read -r -a compiler <<< "$CC"
+read -r -a json_c_cflags <<< "$(pkg-config --cflags json-c)"
 "${compiler[@]}" \
   -std=c11 -Os -Wall -Wextra -Werror \
+  "${json_c_cflags[@]}" \
   "$REPOSITORY_ROOT/src/paperboard/backend/paperboard-backend.c" \
-  -lcurl \
+  -lcurl -ljson-c -lpthread \
   -o "$build_directory/backend/entry"
 
 [[ -s "$build_directory/resources.rcc" ]] || die "resource bundle was not created"

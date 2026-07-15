@@ -1,190 +1,146 @@
 # Paperboard
 
-Paperboard is this repository's first custom Paper Pure application: a quiet,
-full-screen e-ink dashboard rendered as a native AppLoad QML frontend while
-preserving the stock reMarkable interface.
+Paperboard is a private, agent-friendly output queue for the Paper Pure. An
+agent can post a message, update a progress card, push a normalized image, or
+clear the queue. Nothing steals focus: delivery waits at the relay until the
+owner opens Paperboard from AppLoad.
 
-## Current milestone
+```text
+CLI or MCP tool ──HTTPS/Tailscale──> relay ──long poll──> Paper Pure
+                                     │                    Paperboard QML
+TRMNL hosted or Terminus ────────────┘                    (foreground only)
+```
 
-Version `0.2.0` adds an on-demand HTTPS image backend to the offline display
-proof. It stores no credentials in this repository, installs no system service,
-and does not modify the protected root filesystem. The backend exists only
-while Paperboard is open and AppLoad terminates it on return.
+The tested path is WSL relay → Windows Tailscale Serve → tablet Tailscale
+userspace SOCKS proxy → Paperboard. The private DNS name and all credentials
+remain in ignored mode-0600 files.
 
-It verifies:
+## What version 1 supports
 
-- resource compilation with the official Paper Pure (`tatsu`) SDK;
-- Qt Quick rendering inside AppLoad's managed surface;
-- native touch delivery;
-- a deliberate full-screen e-ink layout;
-- local refresh interaction;
-- verified HTTPS transport through libcurl and the device CA bundle;
-- decode-before-acceptance and atomic last-good caching; and
-- clean return to the stock interface.
+- Message, progress, and image cards.
+- Urgent, pinned, normal, and ambient ordering.
+- Replace keys for one continuously updated status card.
+- Default five-minute TTL, maximum 24 hours, or explicit pinning.
+- Previous/next, pin, dismiss, ambient, refresh, and return controls.
+- Authenticated long polling with cursor acknowledgements and offline catch-up.
+- TRMNL Hosted BYOD and self-hosted Terminus as optional ambient providers.
+- A generic CLI and four MCP tools; no dependency on a particular agent.
+- No background display takeover. The app and relay polling client exist only
+  while Paperboard is in the foreground.
 
-The initial application is constrained to Paper Pure and reMarkable OS `3.27.x`
-until later versions are tested explicitly.
+## Build and deploy the tablet application
 
-## Build
-
-Install the pinned official SDK outside the repository:
+Install the pinned official Paper Pure SDK outside the repository, then build:
 
 ```bash
 scripts/setup-paperboard-sdk.sh --dry-run
 scripts/setup-paperboard-sdk.sh
-```
-
-The setup script downloads the SDK published for reMarkable OS `3.27.0.97` and
-the `tatsu` platform, verifies its recorded SHA-256 digest, and installs it to
-`~/.local/share/remarkable-sdk/tatsu-3.27.0.97` by default.
-
-Build Paperboard:
-
-```bash
 scripts/build-paperboard.sh --clean
-```
-
-Build output belongs under ignored `build/paperboard-tatsu/`.
-
-## Deploy
-
-Verify the target and planned files without changing the tablet:
-
-```bash
 scripts/deploy-paperboard.sh --dry-run
-```
-
-Deploy the built backend, resource bundle, and manifest:
-
-```bash
 scripts/deploy-paperboard.sh
 ```
 
-Deployment verifies the platform, architecture, and OS family; stages files
-under the persistent home partition; atomically replaces the AppLoad directory;
-and retains the immediately previous deployment outside AppLoad under
-`/home/root/.local/share/paperboard/deployment-previous`.
+The deployment is constrained to `imx93-tatsu`, `aarch64`, and reMarkable OS
+`3.27.x`. It installs only below the persistent home partition and retains the
+previous AppLoad bundle for rollback.
 
-Use **Reload** in AppLoad after normal deployment. This avoids restarting the
-stock UI and preserves an unlocked development session. If AppLoad cannot
-reload normally, deploy with `--restart-xovi`; save open work first and allow
-at least 15 seconds for the UI to settle afterward.
+## Connect it to a provisioned relay
 
-## On-device paths
+Provisioning writes two ignored files:
 
 ```text
-/home/root/xovi/exthome/appload/paperboard/
-├── manifest.json
-├── resources.rcc
-└── backend/
-    └── entry
+secrets/tablets/<device>.conf       # copy to the tablet
+secrets/clients/<client>.env        # source on an authorized agent host
 ```
 
-The QML frontend is loaded by AppLoad into the stock Qt process. It does not
-start a second display process, stop `xochitl`, or directly take ownership of
-the framebuffer. AppLoad starts the small ARM64 backend on demand and connects
-it over a temporary Unix socket.
-
-## Configure a dashboard
-
-Put one HTTPS URL in a private file outside this repository, then transfer it
-without printing it:
+Install the tablet's redacted relay config without printing its token:
 
 ```bash
-printf '%s\n' 'https://dashboard.example/image.png' > ~/paperboard-url
-chmod 600 ~/paperboard-url
-scripts/configure-paperboard.sh --from-file ~/paperboard-url --dry-run
-scripts/configure-paperboard.sh --from-file ~/paperboard-url
+scripts/configure-paperboard.sh \
+  --relay-config secrets/tablets/paper-pure.conf --dry-run
+scripts/configure-paperboard.sh \
+  --relay-config secrets/tablets/paper-pure.conf
 ```
 
-The script writes `/home/root/.config/paperboard/config` as mode `0600`.
-Paperboard refuses symlinked, non-root-owned, or group/world-readable config;
-non-HTTPS URLs; URL user info; images over 8 MiB; non-PNG data; unsafe image
-dimensions; transport errors; and Qt decode failures. HTTPS redirects are
-limited to three and may only remain on HTTPS. Peer and hostname verification
-use `/etc/ssl/certs/ca-certificates.crt`.
-
-Signed URLs are credentials. Keep their source file outside the repository,
-avoid shell history, scope them read-only, and give them a short lifetime.
-Remove the on-device configuration with:
+Install and start the pinned ARM64 Tailscale binaries in userspace mode:
 
 ```bash
-scripts/configure-paperboard.sh --remove
+scripts/install-paperboard-tailscale.sh --dry-run
+scripts/install-paperboard-tailscale.sh
+scripts/start-paperboard-tailscale.sh --hostname paper-pure
 ```
 
-The private last-good image is stored at
-`/home/root/.local/share/paperboard/dashboard.png`. A failed refresh never
-replaces it. Removing configuration intentionally leaves that offline cache;
-delete it separately if its content is sensitive.
+The one-time Tailscale authentication URL is a legitimate human boundary. The
+service changes no kernel routes, creates no system service, and listens only
+on `127.0.0.1:1055` for SOCKS5. See [Tailscale](tailscale.md).
+
+## Send output
+
+```bash
+set -a
+. secrets/clients/local-agent.env
+set +a
+
+pnpm paperboard show --device paper-pure \
+  --title "Build complete" --body "All checks passed." --priority urgent
+
+pnpm paperboard show --device paper-pure \
+  --title "Rendering" --progress 10 --replace-key current-build
+
+pnpm paperboard show --device paper-pure \
+  --title "Dashboard" --image ./dashboard.png --ttl 900
+
+pnpm paperboard status --device paper-pure
+pnpm paperboard clear --device paper-pure
+```
+
+The `show` response contains the card ID used by `update`. For agent-native
+integration, use [Agent tools](agent-tools.md).
+
+## E-ink behavior
+
+Snapshots are applied at most once every two seconds. Image decode requests a
+full refresh; message/progress changes request a periodic full refresh after
+ten changed frames. There are no animations. One-second pushes are accepted by
+the relay but deliberately coalesced on screen; for chat or live status,
+two-second visual updates are the practical floor and one-minute updates are
+gentle on the display.
+
+## Portable and desk modes
+
+- **Portable:** let the tablet sleep normally. Output queues at the relay and
+  catches up when Paperboard is opened. No wake daemon is installed.
+- **Desk session:** connect power, keep Paperboard open, and temporarily turn
+  off Auto sleep. Restore Auto sleep afterward. The relay long poll normally
+  delivers changes within a couple of seconds.
+
+Do not disable the passcode. Paperboard cannot unlock or bypass a locked
+tablet.
+
+## Legacy single-image mode
+
+`scripts/configure-paperboard.sh --from-file FILE` remains supported for a
+single HTTPS PNG URL. Relay mode is recommended for authenticated cards,
+providers, agents, and safe queueing.
 
 ## Remove or roll back
 
-Exit Paperboard first, then preview and remove only the AppLoad bundle:
-
 ```bash
+scripts/stop-paperboard-tailscale.sh
+scripts/configure-paperboard.sh --remove
 scripts/remove-paperboard.sh --dry-run
 scripts/remove-paperboard.sh
 ```
 
-Add `--purge-data` to delete its private configuration, last-good cache, and
-retained deployment. A normal redeploy keeps the immediately previous bundle
-at `/home/root/.local/share/paperboard/deployment-previous`; restore it only
-while Paperboard is closed, then use **Reload** in AppLoad.
+Use `--purge-data` only when local config, cached snapshots/assets, Tailscale
+state, and the previous deployment should also be removed. See the script's
+dry run before destructive cleanup.
 
-## Verification checklist
+## Verified baseline
 
-1. Paperboard appears in AppLoad.
-2. It launches fullscreen without restarting the tablet.
-3. The complete composition is visible with no clipping or rotation error.
-4. With no config, **REFRESH PROOF** fails closed without creating a cache.
-5. With a valid config, refresh displays a decoded PNG and creates a mode
-   `0600` last-good image.
-6. A bad response leaves the last-good SHA-256 unchanged.
-7. **RETURN** exits, restores AppLoad, and terminates the backend.
-8. `scripts/status.sh` still reports `xovi-appload` and a read-only root mount.
-
-## Agent-side screen control
-
-The optional `paperctl` helper lets an authenticated SSH operator capture the
-current screen and inject a single tap using screenshot coordinates. It adds no
-listener or background service and cannot bypass the tablet passcode.
-
-Install the reviewed Vellum screenshot extension and build/deploy the tap
-helper before first use:
-
-```bash
-ssh remarkable-usb '/home/root/.vellum/bin/vellum add --simulate rm-shot'
-ssh remarkable-usb '/home/root/.vellum/bin/vellum add rm-shot && /home/root/xovi/start'
-scripts/build-paperctl.sh
-scripts/deploy-paperctl.sh
-```
-
-Then:
-
-```bash
-scripts/paperctl.sh status
-scripts/paperctl.sh screenshot
-scripts/paperctl.sh tap 700 900
-```
-
-Screenshots are written under ignored `captures/` by default and may contain
-private documents. Never commit them without an explicit content review.
-The current screenshot extension can render unchanged regions as black after
-a partial e-ink update; relaunch the foreground app for a full-frame proof.
-The tablet must already be unlocked; `paperctl` intentionally cannot enter or
-bypass its passcode. See [Agent autonomy](agent-autonomy.md) for session setup
-and the end-of-session checklist.
-
-## Next milestone
-
-Add a configurable presentation policy for native-resolution monochrome
-dashboard images, then implement TRMNL protocol compatibility. Scheduled
-background refresh remains deliberately deferred until suspend, battery, and
-network behavior are measured safely.
-
-## Primary references
-
-- [Official reMarkable SDK documentation](https://developer.remarkable.com/documentation/sdk)
-- [Official Qt Quick application guide](https://developer.remarkable.com/documentation/qt_epaper)
-- [AppLoad](https://github.com/asivery/rm-appload)
-- [Vellum packages](https://github.com/vellum-dev/vellum)
+The complete relay path, message/progress replacement, authenticated image
+delivery, foreground-only queueing, app reopen/catch-up, and tablet screenshot
+rendering were exercised on Paper Pure OS `3.27.3.0`. Hosted TRMNL requires an
+owner BYOD API key and was contract-tested rather than called with a real
+account. Terminus is contract-tested; its full stack requires the Docker
+versions in [Providers](providers.md).

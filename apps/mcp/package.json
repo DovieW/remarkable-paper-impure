@@ -1,0 +1,8 @@
+{
+  "name": "@paperboard/mcp",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": { "build": "tsc -p tsconfig.json", "check": "tsc -p tsconfig.json --noEmit", "start": "tsx src/main.ts", "test": "node --test --import tsx test/*.test.ts" },
+  "dependencies": { "@modelcontextprotocol/sdk": "^1.29.0", "@paperboard/client": "workspace:*", "@paperboard/core": "workspace:*", "zod": "^4.1.12" },
+  "devDependencies": { "@types/node": "^24.10.0", "tsx": "^4.20.6", "typescript": "^5.9.3" }
+}

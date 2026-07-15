@@ -1,0 +1,13 @@
+.git
+.env
+**/.env
+node_modules
+**/node_modules
+dist
+**/dist
+build
+captures
+backups
+data
+secrets
+PERSONAL.md

@@ -31,6 +31,10 @@ Read this file completely before interacting with a tablet.
 9. Treat Developer Mode as unsuitable for enterprise-managed or confidential
    work data unless the responsible organization has explicitly approved it.
 10. Explain every physical or destructive step before the user performs it.
+11. For Paperboard, never print, commit, or send client/device/admin/provider
+    tokens or private tailnet hostnames. Source ignored files in a subshell.
+12. Never enable Tailscale Funnel or expose relay/admin ports publicly. The
+    admin listener must remain on host loopback.
 
 ## Trust order
 
@@ -150,6 +154,24 @@ The stack in [docs/custom-software.md](docs/custom-software.md) is an observed
 example for OS `3.27.3.0`, not a universal installer. Revalidate all package
 constraints and artifact hashes before reproducing it on another tablet.
 
+### 7. Paperboard handoff
+
+If the owner asks for agent output, TRMNL, Terminus, or a programmable display,
+read [docs/paperboard.md](docs/paperboard.md), [docs/relay.md](docs/relay.md),
+and [docs/security.md](docs/security.md). Prefer the generic MCP or CLI surface
+over agent-specific integrations.
+
+Paperboard is queue-only: posting a card must not launch Paperboard or take
+over the current foreground app. For long unattended work, use a replace key
+and update only meaningful milestones. A relay response proves the output was
+queued; compare status cursor, heartbeat, and last acknowledgement before
+claiming that the tablet received it.
+
+Use the reviewed SSH screenshot/tap tooling for non-sensitive navigation when
+available. Never automate unlock, request the passcode, or leave Auto sleep
+disabled after a desk session. Build narrow reusable helpers when they remove
+routine physical handoffs without weakening authentication.
+
 ## Change quality bar
 
 Scripts must use strict shell mode, quote variables, validate prerequisites,
@@ -167,3 +189,10 @@ git diff --check
 
 Also scan tracked files and history for secrets and personal device/network
 identifiers before any public push.
+
+For the TypeScript workspace also run:
+
+```bash
+pnpm check
+pnpm test
+```

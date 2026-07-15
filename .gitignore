@@ -11,6 +11,15 @@ config/*.local
 backups/
 captures/
 build/
+node_modules/
+dist/
+*.tsbuildinfo
+data/
+secrets/
+coverage/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 
 # Owner-specific tablet, network, and recovery notes. Use PERSONAL.example.md
 # as the public-safe template; PERSONAL.md must remain local.
