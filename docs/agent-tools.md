@@ -43,8 +43,37 @@ Available tools:
 
 - `paperboard_show` — queue a message or progress card.
 - `paperboard_update` — update an existing card.
+- `paperboard_show_image` — normalize, upload, and queue a local image.
+- `paperboard_list`, `paperboard_get`, and `paperboard_delete` — inspect or remove individual cards.
 - `paperboard_clear` — clear one device queue.
-- `paperboard_status` — read queue/cursor/provider/heartbeat state.
+- `paperboard_status` — read queue, cursor, delivery, heartbeat, foreground app,
+  visible card, ambient mode, controls, and last action result.
+- `paperboard_wait` — wait for tablet acknowledgement or actual visibility.
+- `paperboard_control` — while Paperboard is visibly foregrounded, move between
+  cards, enter/leave ambient mode, show/hide controls, refresh, or return.
+- `canvas_start`, `canvas_list`, `canvas_status`, `canvas_send`,
+  `canvas_events`, `canvas_ack`, and `canvas_close` — run structured interactive
+  Canvas conversations.
+
+The client CLI exposes the same client-scoped operations. Administrative token,
+device provisioning, provider credentials, and client-scope changes remain out
+of MCP on purpose.
+
+## Trusted-host tablet companion
+
+`scripts/tablet-companion.sh` is a separate, SSH-local, read-only boundary:
+
+```bash
+scripts/tablet-companion.sh status
+scripts/tablet-companion.sh apps
+scripts/tablet-companion.sh screenshot
+```
+
+It reports semantic state and captures the screen, but it does not accept shell
+text, raw taps, passcodes, or unlock requests. Navigation inside Paperboard goes
+through `paperboard_control`, where the tablet reports whether the command was
+actually completed. This v1 boundary is intentionally smaller than the raw
+developer-only `paperctl.sh` diagnostic utility.
 
 ## Suggested agent policy
 

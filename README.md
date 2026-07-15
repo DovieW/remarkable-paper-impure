@@ -39,6 +39,8 @@ human-facing walkthrough is [Zero-to-running quickstart](docs/agent-quickstart.m
 - `docs/agent-autonomy.md` — rules and tooling for agents to launch, observe,
   and verify work themselves while preserving authentication boundaries.
 - `docs/paperboard.md` — the private output queue and Paper Pure application.
+- `docs/canvas.md` — the manually opened interactive touch UI for agent sessions.
+- `docs/home-assistant.md` — the risk-tiered, allowlisted Canvas adapter.
 - `docs/relay.md` — hardened relay deployment for WSL/Windows or Linux.
 - `docs/agent-tools.md` — generic CLI and MCP tools for any AI agent.
 - `docs/providers.md` — TRMNL Hosted BYOD and Terminus integration.
@@ -93,6 +95,11 @@ scripts/start-paperboard-relay-windows.sh
 Then follow [Paperboard](docs/paperboard.md) for tablet Tailscale, provisioning,
 deployment, and a first card. Secrets and private hostnames live only under
 ignored `secrets/` and `deploy/*/.env` files.
+
+[Canvas](docs/canvas.md) is a separate AppLoad application for interactive
+agent prompts and structured touch responses. This separation keeps Paperboard
+quiet and ambient while allowing agents to offer choices, confirmations, and
+checklists when a person explicitly opens Canvas.
 
 ## Project rules
 

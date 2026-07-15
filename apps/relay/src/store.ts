@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { CardInput, CardPatch, DeliveryCard } from "@paperboard/core";
+import type { CanvasEventInput, CanvasMessageInput, CardInput, CardPatch, DeliveryCard, PaperboardCommandAction, PaperboardUiState } from "@paperboard/core";
 
 type DeviceRow = { id: string; token_hash: string; cursor: number; last_seen_at: string | null; last_ack_cursor: number; provider_kind: string };
 type ClientRow = { id: string; token_hash: string; scopes: string };
@@ -11,6 +11,9 @@ type CardRow = {
   progress: number | null; asset_id: string | null; priority: DeliveryCard["priority"]; pinned: number;
   replace_key: string | null; created_at: string; expires_at: string | null;
 };
+type CommandRow = { id: string; device_id: string; action: PaperboardCommandAction; status: string; detail: string; created_at: string; expires_at: string; completed_at: string | null };
+type CanvasSessionRow = { id: string; device_id: string; title: string; status: string; cursor: number; created_at: string; updated_at: string };
+type CanvasMessageRow = { id: string; session_id: string; cursor: number; title: string; body: string; asset_id: string | null; actions_json: string; replace_key: string | null; created_at: string };
 
 export interface DeviceStatus {
   id: string;
@@ -83,6 +86,34 @@ export class Store {
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY(client_id, idempotency_key)
       );
+      CREATE TABLE IF NOT EXISTS device_ui_state (
+        device_id TEXT PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
+        application TEXT NOT NULL, state_json TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS tablet_commands (
+        id TEXT PRIMARY KEY, device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+        action TEXT NOT NULL, status TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL, expires_at TEXT NOT NULL, completed_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS tablet_commands_device ON tablet_commands(device_id, status, expires_at);
+      CREATE TABLE IF NOT EXISTS canvas_sessions (
+        id TEXT PRIMARY KEY, device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+        title TEXT NOT NULL, status TEXT NOT NULL, cursor INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS canvas_messages (
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES canvas_sessions(id) ON DELETE CASCADE,
+        cursor INTEGER NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL,
+        asset_id TEXT REFERENCES assets(id) ON DELETE SET NULL, actions_json TEXT NOT NULL,
+        replace_key TEXT, created_at TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS canvas_messages_replace_key ON canvas_messages(session_id, replace_key) WHERE replace_key IS NOT NULL;
+      CREATE TABLE IF NOT EXISTS canvas_events (
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES canvas_sessions(id) ON DELETE CASCADE,
+        cursor INTEGER NOT NULL, message_id TEXT NOT NULL REFERENCES canvas_messages(id) ON DELETE CASCADE,
+        action_id TEXT NOT NULL, value_json TEXT NOT NULL, acknowledged INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      );
     `);
   }
 
@@ -96,6 +127,10 @@ export class Store {
 
   createClient(id: string, tokenHash: string, scopes: string[]): void {
     this.db.prepare("INSERT INTO clients(id, token_hash, scopes) VALUES (?, ?, ?)").run(id, tokenHash, scopes.join(" "));
+  }
+
+  updateClientScopes(id: string, scopes: string[]): boolean {
+    return this.db.prepare("UPDATE clients SET scopes=? WHERE id=?").run(scopes.join(" "), id).changes === 1;
   }
 
   getDevice(id: string): DeviceRow | undefined {
@@ -153,6 +188,8 @@ export class Store {
   getCard(deviceId: string, id: string): CardRow | undefined {
     return this.db.prepare("SELECT * FROM cards WHERE device_id=? AND id=?").get(deviceId, id) as CardRow | undefined;
   }
+
+  listCards(deviceId: string, assetBaseUrl: string): DeliveryCard[] { return this.activeCards(deviceId, assetBaseUrl); }
 
   updateCard(deviceId: string, id: string, patch: CardPatch): CardRow | undefined {
     const current = this.getCard(deviceId, id);
@@ -218,6 +255,113 @@ export class Store {
     return row;
   }
 
+  putUiState(deviceId: string, state: PaperboardUiState): void {
+    const now = new Date().toISOString();
+    this.db.prepare(`INSERT INTO device_ui_state(device_id, application, state_json, updated_at) VALUES (?, ?, ?, ?)
+      ON CONFLICT(device_id) DO UPDATE SET application=excluded.application, state_json=excluded.state_json, updated_at=excluded.updated_at`)
+      .run(deviceId, state.application, JSON.stringify(state), now);
+    this.heartbeat(deviceId, state.rendered_cursor);
+  }
+
+  getUiState(deviceId: string): (PaperboardUiState & { updated_at: string; fresh: boolean }) | undefined {
+    const row = this.db.prepare("SELECT state_json, updated_at FROM device_ui_state WHERE device_id=?").get(deviceId) as { state_json: string; updated_at: string } | undefined;
+    if (!row) return undefined;
+    const state = JSON.parse(row.state_json) as PaperboardUiState;
+    const fresh = Date.now() - Date.parse(row.updated_at) <= 10_000;
+    return { ...state, foreground: state.foreground && fresh, updated_at: row.updated_at, fresh };
+  }
+
+  createCommand(deviceId: string, action: PaperboardCommandAction): CommandRow {
+    const now = new Date();
+    const id = randomUUID().replaceAll("-", "");
+    this.db.prepare("INSERT INTO tablet_commands(id, device_id, action, status, created_at, expires_at) VALUES (?, ?, ?, 'queued', ?, ?)")
+      .run(id, deviceId, action, now.toISOString(), new Date(now.getTime() + 15_000).toISOString());
+    return this.getCommand(deviceId, id)!;
+  }
+
+  getCommand(deviceId: string, id: string): CommandRow | undefined {
+    return this.db.prepare("SELECT * FROM tablet_commands WHERE device_id=? AND id=?").get(deviceId, id) as CommandRow | undefined;
+  }
+
+  pendingCommands(deviceId: string): CommandRow[] {
+    const now = new Date().toISOString();
+    this.db.prepare("UPDATE tablet_commands SET status='expired', completed_at=? WHERE device_id=? AND status IN ('queued','delivered') AND expires_at<=?").run(now, deviceId, now);
+    const rows = this.db.prepare("SELECT * FROM tablet_commands WHERE device_id=? AND status='queued' AND expires_at>? ORDER BY created_at").all(deviceId, now) as CommandRow[];
+    for (const row of rows) this.db.prepare("UPDATE tablet_commands SET status='delivered' WHERE id=?").run(row.id);
+    return rows.map((row) => ({ ...row, status: "delivered" }));
+  }
+
+  finishCommand(deviceId: string, id: string, status: "completed" | "failed", detail: string): boolean {
+    return this.db.prepare("UPDATE tablet_commands SET status=?, detail=?, completed_at=? WHERE device_id=? AND id=? AND status IN ('queued','delivered')")
+      .run(status, detail, new Date().toISOString(), deviceId, id).changes === 1;
+  }
+
+  createCanvasSession(deviceId: string, title: string): CanvasSessionRow {
+    const id = randomUUID().replaceAll("-", ""); const now = new Date().toISOString();
+    this.db.prepare("INSERT INTO canvas_sessions(id, device_id, title, status, created_at, updated_at) VALUES (?, ?, ?, 'open', ?, ?)").run(id, deviceId, title, now, now);
+    return this.getCanvasSession(deviceId, id)!;
+  }
+
+  getCanvasSession(deviceId: string, id: string): CanvasSessionRow | undefined {
+    return this.db.prepare("SELECT * FROM canvas_sessions WHERE device_id=? AND id=?").get(deviceId, id) as CanvasSessionRow | undefined;
+  }
+
+  listCanvasSessions(deviceId: string): CanvasSessionRow[] {
+    return this.db.prepare("SELECT * FROM canvas_sessions WHERE device_id=? ORDER BY updated_at DESC").all(deviceId) as CanvasSessionRow[];
+  }
+
+  latestOpenCanvasSession(deviceId: string): CanvasSessionRow | undefined {
+    return this.db.prepare("SELECT * FROM canvas_sessions WHERE device_id=? AND status='open' ORDER BY updated_at DESC LIMIT 1").get(deviceId) as CanvasSessionRow | undefined;
+  }
+
+  closeCanvasSession(deviceId: string, id: string): boolean {
+    return this.db.prepare("UPDATE canvas_sessions SET status='closed', updated_at=? WHERE device_id=? AND id=?").run(new Date().toISOString(), deviceId, id).changes === 1;
+  }
+
+  createCanvasMessage(deviceId: string, sessionId: string, input: CanvasMessageInput): CanvasMessageRow | undefined {
+    const session = this.getCanvasSession(deviceId, sessionId); if (!session || session.status !== "open") return undefined;
+    return this.transaction(() => {
+      const cursor = session.cursor + 1; const id = randomUUID().replaceAll("-", ""); const now = new Date().toISOString();
+      if (input.replace_key) this.db.prepare("DELETE FROM canvas_messages WHERE session_id=? AND replace_key=?").run(sessionId, input.replace_key);
+      this.db.prepare("INSERT INTO canvas_messages(id, session_id, cursor, title, body, asset_id, actions_json, replace_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(id, sessionId, cursor, input.title, input.body, input.asset_id ?? null, JSON.stringify(input.actions), input.replace_key ?? null, now);
+      this.db.prepare("UPDATE canvas_sessions SET cursor=?, updated_at=? WHERE id=?").run(cursor, now, sessionId);
+      return this.getCanvasMessage(sessionId, id)!;
+    });
+  }
+
+  getCanvasMessage(sessionId: string, id: string): CanvasMessageRow | undefined {
+    return this.db.prepare("SELECT * FROM canvas_messages WHERE session_id=? AND id=?").get(sessionId, id) as CanvasMessageRow | undefined;
+  }
+
+  canvasMessages(deviceId: string, sessionId: string, assetBaseUrl?: string): Array<Record<string, unknown>> {
+    if (!this.getCanvasSession(deviceId, sessionId)) return [];
+    const rows = this.db.prepare("SELECT * FROM canvas_messages WHERE session_id=? ORDER BY cursor").all(sessionId) as CanvasMessageRow[];
+    return rows.map((row) => ({ id: row.id, cursor: row.cursor, title: row.title, body: row.body, asset_id: row.asset_id,
+      ...(row.asset_id && assetBaseUrl ? { asset_url: `${assetBaseUrl}/v1/device/${deviceId}/assets/${row.asset_id}` } : {}),
+      actions: JSON.parse(row.actions_json), created_at: row.created_at }));
+  }
+
+  createCanvasEvent(deviceId: string, sessionId: string, input: CanvasEventInput): Record<string, unknown> | undefined {
+    if (!this.getCanvasSession(deviceId, sessionId) || !this.getCanvasMessage(sessionId, input.message_id)) return undefined;
+    const id = randomUUID().replaceAll("-", ""); const now = new Date().toISOString();
+    const cursor = Number((this.db.prepare("SELECT COALESCE(MAX(cursor),0)+1 AS cursor FROM canvas_events WHERE session_id=?").get(sessionId) as { cursor: number }).cursor);
+    this.db.prepare("INSERT INTO canvas_events(id, session_id, cursor, message_id, action_id, value_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(id, sessionId, cursor, input.message_id, input.action_id, JSON.stringify(input.value), now);
+    return { id, cursor, ...input, created_at: now };
+  }
+
+  canvasEvents(deviceId: string, sessionId: string, after = 0): Array<Record<string, unknown>> {
+    if (!this.getCanvasSession(deviceId, sessionId)) return [];
+    const rows = this.db.prepare("SELECT * FROM canvas_events WHERE session_id=? AND cursor>? ORDER BY cursor").all(sessionId, after) as Array<{ id: string; cursor: number; message_id: string; action_id: string; value_json: string; acknowledged: number; created_at: string }>;
+    return rows.map((row) => ({ ...row, value: JSON.parse(row.value_json), value_json: undefined, acknowledged: Boolean(row.acknowledged) }));
+  }
+
+  acknowledgeCanvasEvent(deviceId: string, sessionId: string, eventId: string): boolean {
+    if (!this.getCanvasSession(deviceId, sessionId)) return false;
+    return this.db.prepare("UPDATE canvas_events SET acknowledged=1 WHERE session_id=? AND id=?").run(sessionId, eventId).changes === 1;
+  }
+
   setProvider(deviceId: string, kind: string, encryptedConfig: string | null): boolean {
     const changed = this.db.prepare("UPDATE devices SET provider_kind=?, provider_config=? WHERE id=?").run(kind, encryptedConfig, deviceId).changes;
     if (changed) this.advanceCursor(deviceId);
@@ -237,6 +381,8 @@ export class Store {
     this.db.prepare("DELETE FROM assets WHERE expires_at<=?").run(now);
     this.db.prepare("DELETE FROM delivery_log WHERE created_at < datetime('now', '-7 days')").run();
     this.db.prepare("DELETE FROM idempotency WHERE created_at < datetime('now', '-1 day')").run();
+    this.db.prepare("DELETE FROM tablet_commands WHERE created_at < datetime('now', '-1 day')").run();
+    this.db.prepare("DELETE FROM canvas_events WHERE created_at < datetime('now', '-7 days')").run();
   }
 
   newAssetPath(id: string): string { return join(this.assetsDir, `${id}.png`); }

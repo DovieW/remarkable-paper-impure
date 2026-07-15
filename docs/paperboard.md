@@ -21,10 +21,13 @@ remain in ignored mode-0600 files.
 - Urgent, pinned, normal, and ambient ordering.
 - Replace keys for one continuously updated status card.
 - Default five-minute TTL, maximum 24 hours, or explicit pinning.
-- Previous/next, pin, dismiss, ambient, refresh, and return controls.
+- Hidden-by-default chrome, horizontal card swipes, edge-swipe controls, and
+  visible two-second feedback for every action.
+- Previous/next, pin, dismiss, persistent ambient mode, refresh, and return.
 - Authenticated long polling with cursor acknowledgements and offline catch-up.
 - TRMNL Hosted BYOD and self-hosted Terminus as optional ambient providers.
-- A generic CLI and four MCP tools; no dependency on a particular agent.
+- Client-scoped API, CLI, and MCP parity for cards, delivery status,
+  foreground navigation, and the separate interactive Canvas application.
 - No background display takeover. The app and relay polling client exist only
   while Paperboard is in the foreground.
 
@@ -33,6 +36,12 @@ backend and immediately unloads every Paperboard frontend. It deliberately
 does not also emit the frontend `close` signal: mixing the two lifecycle paths
 can race the permanent unload and allow a resident frontend to relaunch the
 backend later.
+
+The top and bottom chrome do not consume content space. They begin hidden;
+swipe upward from the bottom or downward from the top to reveal them. A
+horizontal swipe moves between cards and leaves ambient mode. Ambient mode
+continues selecting the highest-ranked ambient frame as provider snapshots
+change until the owner exits it.
 
 ## Landscape orientation
 

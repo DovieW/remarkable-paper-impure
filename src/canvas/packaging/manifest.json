@@ -1,0 +1,8 @@
+{
+  "name": "Canvas",
+  "loadsBackend": true,
+  "entry": "/qml/Main.qml",
+  "id": "canvas",
+  "supportsScaling": true,
+  "canHaveMultipleFrontends": false
+}

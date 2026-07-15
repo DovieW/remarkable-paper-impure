@@ -57,9 +57,72 @@ export const devicePollQuerySchema = z.object({
   wait: z.coerce.number().int().min(0).max(25).default(25),
 });
 
+export const clientScopeSchema = z.enum([
+  "cards:read", "cards:write", "cards:clear", "status:read", "paperboard:control",
+  "canvas:read", "canvas:write",
+]);
+
+export const paperboardCommandActionSchema = z.enum([
+  "previous", "next", "select_ambient", "leave_ambient", "show_controls",
+  "hide_controls", "refresh", "return",
+]);
+
+export const paperboardCommandSchema = z.object({
+  action: paperboardCommandActionSchema,
+});
+
+export const commandResultSchema = z.object({
+  id: z.string().regex(CARD_ID_PATTERN),
+  status: z.enum(["completed", "failed"]),
+  detail: z.string().max(300).default(""),
+});
+
+export const paperboardUiStateSchema = z.object({
+  application: z.literal("paperboard"),
+  foreground: z.boolean(),
+  rendered_cursor: z.number().int().min(0),
+  visible_card_id: z.string().regex(CARD_ID_PATTERN).nullable().default(null),
+  visible_index: z.number().int().min(0).nullable().default(null),
+  card_count: z.number().int().min(0).default(0),
+  ambient_mode: z.boolean().default(false),
+  controls_visible: z.boolean().default(false),
+  last_action: z.string().max(80).default(""),
+  last_result: z.string().max(300).default(""),
+});
+
+export const canvasActionSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("choice"), id: z.string().regex(CARD_ID_PATTERN), label: z.string().min(1).max(100) }),
+  z.object({ type: z.literal("confirm"), id: z.string().regex(CARD_ID_PATTERN), label: z.string().min(1).max(100), confirm_label: z.string().min(1).max(60).default("Confirm"), cancel_label: z.string().min(1).max(60).default("Cancel") }),
+  z.object({ type: z.literal("checklist"), id: z.string().regex(CARD_ID_PATTERN), label: z.string().min(1).max(100), options: z.array(z.object({ id: z.string().regex(CARD_ID_PATTERN), label: z.string().min(1).max(100) })).min(1).max(12) }),
+]);
+
+export const canvasMessageInputSchema = z.object({
+  title: z.string().trim().min(1).max(160),
+  body: z.string().max(12_000).default(""),
+  asset_id: z.string().regex(CARD_ID_PATTERN).optional(),
+  actions: z.array(canvasActionSchema).max(12).default([]),
+  replace_key: z.string().trim().min(1).max(120).optional(),
+});
+
+export const canvasSessionInputSchema = z.object({
+  title: z.string().trim().min(1).max(160),
+});
+
+export const canvasEventInputSchema = z.object({
+  message_id: z.string().regex(CARD_ID_PATTERN),
+  action_id: z.string().regex(CARD_ID_PATTERN),
+  value: z.union([z.string().max(500), z.boolean(), z.array(z.string().regex(CARD_ID_PATTERN)).max(12)]),
+});
+
 export type CardInput = z.infer<typeof cardInputSchema>;
 export type CardPatch = z.infer<typeof cardPatchSchema>;
 export type ProviderInput = z.infer<typeof providerSchema>;
+export type ClientScope = z.infer<typeof clientScopeSchema>;
+export type PaperboardCommandAction = z.infer<typeof paperboardCommandActionSchema>;
+export type PaperboardUiState = z.infer<typeof paperboardUiStateSchema>;
+export type CanvasMessageInput = z.infer<typeof canvasMessageInputSchema>;
+export type CanvasSessionInput = z.infer<typeof canvasSessionInputSchema>;
+export type CanvasEventInput = z.infer<typeof canvasEventInputSchema>;
 
 export interface DeliveryCard {
   id: string;

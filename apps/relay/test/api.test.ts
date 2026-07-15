@@ -21,7 +21,7 @@ function fixture() {
 async function provision(adminApp: ReturnType<typeof buildServer>["adminApp"], adminToken: string, device = "pure-one") {
   const deviceResponse = await adminApp.inject({ method: "POST", url: "/admin/devices", headers: { authorization: `Bearer ${adminToken}` }, payload: { id: device } });
   assert.equal(deviceResponse.statusCode, 201);
-  const clientResponse = await adminApp.inject({ method: "POST", url: "/admin/clients", headers: { authorization: `Bearer ${adminToken}` }, payload: { id: `agent-${device}`, scopes: ["cards:write", "cards:clear", "status:read"] } });
+  const clientResponse = await adminApp.inject({ method: "POST", url: "/admin/clients", headers: { authorization: `Bearer ${adminToken}` }, payload: { id: `agent-${device}`, scopes: ["cards:read", "cards:write", "cards:clear", "status:read", "paperboard:control", "canvas:read", "canvas:write"] } });
   assert.equal(clientResponse.statusCode, 201);
   return { deviceToken: deviceResponse.json().token as string, clientToken: clientResponse.json().token as string };
 }
@@ -118,4 +118,52 @@ test("priority ordering and tablet pin/dismiss actions advance the device cursor
 
   const adminOnPublicListener = await current.app.inject({ method: "POST", url: "/admin/devices", headers: { authorization: `Bearer ${current.config.adminToken}` }, payload: { id: "must-not-exist" } });
   assert.equal(adminOnPublicListener.statusCode, 404);
+});
+
+test("reports visible state and executes only fresh foreground commands", async (context) => {
+  const current = fixture();
+  context.after(async () => { await current.adminApp.close(); await current.app.close(); rmSync(current.root, { recursive: true, force: true }); });
+  const credentials = await provision(current.adminApp, current.config.adminToken);
+  const clientHeaders = { authorization: `Bearer ${credentials.clientToken}` };
+  const deviceHeaders = { authorization: `Bearer ${credentials.deviceToken}` };
+  const created = await current.app.inject({ method: "POST", url: "/v1/devices/pure-one/cards", headers: clientHeaders, payload: { kind: "message", title: "Visible", body: "Now", ttl_seconds: 300, priority: "normal", pinned: false } });
+  const card = created.json().id as string;
+  const denied = await current.app.inject({ method: "POST", url: "/v1/devices/pure-one/commands", headers: clientHeaders, payload: { action: "next" } });
+  assert.equal(denied.statusCode, 409);
+  const state = await current.app.inject({ method: "PUT", url: "/v1/device/pure-one/ui-state", headers: deviceHeaders, payload: { application: "paperboard", foreground: true, rendered_cursor: created.json().cursor, visible_card_id: card, visible_index: 0, card_count: 1, ambient_mode: false, controls_visible: false, last_action: "open", last_result: "visible" } });
+  assert.equal(state.statusCode, 204);
+  const status = await current.app.inject({ method: "GET", url: "/v1/devices/pure-one/status", headers: clientHeaders });
+  assert.equal(status.json().foreground, true);
+  assert.equal(status.json().visible_card.id, card);
+  const command = await current.app.inject({ method: "POST", url: "/v1/devices/pure-one/commands", headers: clientHeaders, payload: { action: "next" } });
+  assert.equal(command.statusCode, 201);
+  const poll = await current.app.inject({ method: "GET", url: `/v1/device/pure-one/poll?cursor=${created.json().cursor}&wait=0`, headers: deviceHeaders });
+  assert.equal(poll.json().commands[0].action, "next");
+  const completed = await current.app.inject({ method: "POST", url: `/v1/device/pure-one/commands/${command.json().id}/result`, headers: deviceHeaders, payload: { status: "completed", detail: "only card" } });
+  assert.equal(completed.statusCode, 204);
+  const result = await current.app.inject({ method: "GET", url: `/v1/devices/pure-one/commands/${command.json().id}`, headers: clientHeaders });
+  assert.equal(result.json().status, "completed");
+});
+
+test("Canvas sessions carry structured messages and acknowledged events", async (context) => {
+  const current = fixture();
+  context.after(async () => { await current.adminApp.close(); await current.app.close(); rmSync(current.root, { recursive: true, force: true }); });
+  const credentials = await provision(current.adminApp, current.config.adminToken);
+  const clientHeaders = { authorization: `Bearer ${credentials.clientToken}` };
+  const deviceHeaders = { authorization: `Bearer ${credentials.deviceToken}` };
+  const session = await current.app.inject({ method: "POST", url: "/v1/devices/pure-one/canvas/sessions", headers: clientHeaders, payload: { title: "Dinner" } });
+  assert.equal(session.statusCode, 201);
+  const sessionId = session.json().id as string;
+  const message = await current.app.inject({ method: "POST", url: `/v1/devices/pure-one/canvas/sessions/${sessionId}/messages`, headers: clientHeaders, payload: { title: "Choose", body: "Dinner", actions: [{ type: "choice", id: "pizza123", label: "Pizza" }] } });
+  assert.equal(message.statusCode, 201);
+  const tabletPoll = await current.app.inject({ method: "GET", url: "/v1/device/pure-one/canvas/poll?cursor=0&wait=0", headers: deviceHeaders });
+  assert.equal(tabletPoll.statusCode, 200);
+  assert.equal(tabletPoll.json().session.id, sessionId);
+  assert.equal(tabletPoll.json().session.messages[0].id, message.json().id);
+  const event = await current.app.inject({ method: "POST", url: `/v1/device/pure-one/canvas/sessions/${sessionId}/events`, headers: deviceHeaders, payload: { message_id: message.json().id, action_id: "pizza123", value: "pizza" } });
+  assert.equal(event.statusCode, 201);
+  const events = await current.app.inject({ method: "GET", url: `/v1/devices/pure-one/canvas/sessions/${sessionId}/events`, headers: clientHeaders });
+  assert.equal(events.json().events[0].value, "pizza");
+  const ack = await current.app.inject({ method: "POST", url: `/v1/devices/pure-one/canvas/sessions/${sessionId}/events/${event.json().id}/ack`, headers: clientHeaders });
+  assert.equal(ack.statusCode, 204);
 });

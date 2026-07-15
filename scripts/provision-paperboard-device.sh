@@ -36,7 +36,7 @@ curl --fail-with-body --silent --show-error \
   "$admin_url/admin/devices" > "$temporary/device.json"
 curl --fail-with-body --silent --show-error \
   -H "Authorization: Bearer $admin_token" -H 'Content-Type: application/json' \
-  --data "$(jq -cn --arg id "$client" '{id:$id,scopes:["cards:write","cards:clear","status:read"]}')" \
+  --data "$(jq -cn --arg id "$client" '{id:$id,scopes:["cards:read","cards:write","cards:clear","status:read","paperboard:control","canvas:read","canvas:write"]}')" \
   "$admin_url/admin/clients" > "$temporary/client.json"
 device_token=$(jq -er '.token' "$temporary/device.json")
 client_token=$(jq -er '.token' "$temporary/client.json")

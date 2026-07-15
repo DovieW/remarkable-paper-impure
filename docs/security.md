@@ -32,7 +32,7 @@ confidential work content as cards.
   still requires a scoped client or device token.
 - The administration listener is separate and host-loopback-only.
 - Device tokens can poll/ack and act on only their matching device. Agent
-  tokens hold explicit `cards:write`, `cards:clear`, and/or `status:read`
+  tokens hold explicit card, status, Paperboard-control, and Canvas scopes
   scopes. A client scope currently applies to every device on that relay, so
   use a separate relay when devices have different trust owners.
 - Tokens are generated with high entropy and stored server-side only as

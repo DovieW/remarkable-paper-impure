@@ -41,6 +41,37 @@ Rectangle {
     property double lastAppliedAt: 0
     property int changedFrames: 0
     property bool legacyCandidate: false
+    property bool controlsVisible: false
+    property bool ambientMode: false
+    property string toastText: ""
+    property string lastAction: ""
+    property string lastResult: ""
+
+    function showToast(text) {
+        toastText = text
+        toastTimer.restart()
+    }
+
+    function showControls() {
+        controlsVisible = true
+        chromeTimer.restart()
+        reportState()
+    }
+
+    function hideControls() {
+        controlsVisible = false
+        chromeTimer.stop()
+        reportState()
+    }
+
+    function reportState() {
+        endpoint.sendMessage(6, JSON.stringify({
+            application: "paperboard", foreground: true, rendered_cursor: cursor,
+            visible_card_id: currentCard.id || null, visible_index: cards.length ? currentIndex : null,
+            card_count: cards.length, ambient_mode: ambientMode, controls_visible: controlsVisible,
+            last_action: lastAction, last_result: lastResult
+        }))
+    }
 
     function applySnapshot(contents) {
         var previousId = currentCard.id || ""
@@ -57,6 +88,8 @@ Rectangle {
         backendDetail = cards.length > 0 ? cards.length + " queued card" + (cards.length === 1 ? "" : "s") : "No queued output"
         lastAppliedAt = Date.now()
         changedFrames += 1
+        if (ambientMode) selectAmbient(false)
+        reportState()
         if (changedFrames >= 10) { changedFrames = 0; requestFullRefresh() }
     }
 
@@ -75,14 +108,42 @@ Rectangle {
 
     function move(delta) {
         if (cards.length === 0) return
+        ambientMode = false
         currentIndex = (currentIndex + delta + cards.length) % cards.length
+        lastAction = delta < 0 ? "previous" : "next"
+        lastResult = "Showing card " + (currentIndex + 1) + " of " + cards.length
+        showToast(lastResult)
+        reportState()
     }
 
-    function selectAmbient() {
+    function selectAmbient(notify) {
+        ambientMode = true
         for (var index = 0; index < cards.length; index++) {
-            if (cards[index].priority === "ambient") { currentIndex = index; return }
+            if (cards[index].priority === "ambient") {
+                currentIndex = index
+                lastAction = "select_ambient"; lastResult = "Ambient mode on"
+                if (notify !== false) showToast(lastResult)
+                reportState(); return true
+            }
         }
-        backendDetail = "No ambient provider frame is queued"
+        ambientMode = false
+        lastAction = "select_ambient"; lastResult = "No ambient card is queued"
+        if (notify !== false) showToast(lastResult)
+        reportState(); return false
+    }
+
+    function runCommand(command) {
+        var ok = true
+        if (command.action === "previous") move(-1)
+        else if (command.action === "next") move(1)
+        else if (command.action === "select_ambient") ok = selectAmbient(true)
+        else if (command.action === "leave_ambient") { ambientMode = false; showToast("Ambient mode off"); reportState() }
+        else if (command.action === "show_controls") showControls()
+        else if (command.action === "hide_controls") hideControls()
+        else if (command.action === "refresh") { endpoint.sendMessage(1, "refresh"); showToast("Refreshing") }
+        else if (command.action === "return") { endpoint.sendMessage(7, JSON.stringify({id: command.id, status: "completed", detail: "Returning to launcher"})); returnToLauncher(); return }
+        else ok = false
+        endpoint.sendMessage(7, JSON.stringify({id: command.id, status: ok ? "completed" : "failed", detail: ok ? (lastResult || "Command completed") : "Command could not be completed"}))
     }
 
     Timer {
@@ -93,6 +154,10 @@ Rectangle {
             root.pendingSnapshot = ""
         }
     }
+
+    Timer { id: heartbeatTimer; interval: 5000; repeat: true; running: true; onTriggered: root.reportState() }
+    Timer { id: chromeTimer; interval: 6000; repeat: false; onTriggered: root.hideControls() }
+    Timer { id: toastTimer; interval: 2000; repeat: false; onTriggered: root.toastText = "" }
 
     AppLoad {
         id: endpoint
@@ -114,6 +179,14 @@ Rectangle {
                 legacyImage.source = "file://" + contents + "?accepted=" + Date.now()
             } else if (type === 105) {
                 root.queueSnapshot(contents)
+            } else if (type === 106) {
+                try { root.runCommand(JSON.parse(contents)) }
+                catch (error) { root.showToast("Invalid remote command") }
+            } else if (type === 107) {
+                root.lastAction = contents
+                root.lastResult = contents === "pin" ? "Pin changed" : "Card dismissed"
+                root.showToast(root.lastResult)
+                root.reportState()
             }
         }
     }
@@ -155,6 +228,8 @@ Rectangle {
             width: parent.width
             height: 68 * root.unit
             spacing: 18 * root.unit
+            visible: root.controlsVisible
+            z: 10
 
             Text {
                 text: "PAPERBOARD"
@@ -185,12 +260,12 @@ Rectangle {
             }
         }
 
-        Rectangle { id: topRule; anchors.top: masthead.bottom; width: parent.width; height: 3 * root.unit; color: ink }
+        Rectangle { id: topRule; anchors.top: masthead.bottom; width: parent.width; height: 3 * root.unit; color: ink; visible: root.controlsVisible; z: 10 }
 
         Item {
             id: content
-            anchors.top: topRule.bottom
-            anchors.bottom: statusRule.top
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
             width: parent.width
 
             Column {
@@ -301,7 +376,7 @@ Rectangle {
             }
         }
 
-        Rectangle { id: statusRule; anchors.bottom: statusBar.top; width: parent.width; height: 2 * root.unit; color: ink }
+        Rectangle { id: statusRule; anchors.bottom: statusBar.top; width: parent.width; height: 2 * root.unit; color: ink; visible: root.controlsVisible; z: 10 }
 
         Row {
             id: statusBar
@@ -309,6 +384,8 @@ Rectangle {
             width: parent.width
             height: 62 * root.unit
             spacing: 18 * root.unit
+            visible: root.controlsVisible
+            z: 10
             Text {
                 text: backendDetail.toUpperCase()
                 color: muted
@@ -334,6 +411,8 @@ Rectangle {
             width: parent.width
             height: 82 * root.unit
             spacing: 9 * root.unit
+            visible: root.controlsVisible
+            z: 10
 
             Repeater {
                 model: ["PREV", "NEXT", "PIN", "DISMISS", "AMBIENT", "REFRESH", "RETURN"]
@@ -354,17 +433,56 @@ Rectangle {
                     }
                     MouseArea {
                         anchors.fill: parent
+                        onPressed: root.showToast(modelData)
                         onClicked: {
                             if (modelData === "PREV") root.move(-1)
                             else if (modelData === "NEXT") root.move(1)
                             else if (modelData === "PIN" && root.currentCard.id) endpoint.sendMessage(5, root.currentCard.id)
                             else if (modelData === "DISMISS" && root.currentCard.id) endpoint.sendMessage(4, root.currentCard.id)
-                            else if (modelData === "AMBIENT") root.selectAmbient()
-                            else if (modelData === "REFRESH") endpoint.sendMessage(1, "refresh")
+                            else if (modelData === "AMBIENT") { if (root.ambientMode) { root.ambientMode = false; root.showToast("Ambient mode off"); root.reportState() } else root.selectAmbient(true) }
+                            else if (modelData === "REFRESH") { endpoint.sendMessage(1, "refresh"); root.showToast("Refreshing") }
                             else if (modelData === "RETURN") root.returnToLauncher()
                         }
                     }
                 }
+            }
+        }
+
+        MouseArea {
+            id: gestureArea
+            anchors.fill: parent
+            z: root.controlsVisible ? 5 : 30
+            property real startX: 0
+            property real startY: 0
+            onPressed: { startX = mouse.x; startY = mouse.y }
+            onReleased: {
+                var dx = mouse.x - startX
+                var dy = mouse.y - startY
+                if (Math.abs(dx) > 120 * root.unit && Math.abs(dx) > Math.abs(dy) * 1.35) root.move(dx < 0 ? 1 : -1)
+                else if (Math.abs(dy) > 90 * root.unit && Math.abs(dy) > Math.abs(dx)) {
+                    if ((startY > height * 0.72 && dy < 0) || (startY < height * 0.28 && dy > 0)) root.showControls()
+                } else if (!root.controlsVisible) root.showControls()
+                else root.hideControls()
+            }
+        }
+
+        Rectangle {
+            visible: root.toastText !== ""
+            z: 50
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 42 * root.unit
+            width: Math.min(parent.width * 0.72, toastLabel.implicitWidth + 70 * root.unit)
+            height: 74 * root.unit
+            color: ink
+            Text {
+                id: toastLabel
+                anchors.centerIn: parent
+                text: root.toastText.toUpperCase()
+                color: paper
+                font.family: "Noto Mono"
+                font.pixelSize: 19 * root.unit
+                font.weight: Font.Bold
             }
         }
         }

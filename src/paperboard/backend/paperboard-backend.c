@@ -17,8 +17,13 @@
 #include <time.h>
 #include <unistd.h>
 
+#ifdef CANVAS_MODE
+#define CONFIG_PATH "/home/root/.config/paperboard/config"
+#define STATE_DIR "/home/root/.local/share/canvas"
+#else
 #define CONFIG_PATH "/home/root/.config/paperboard/config"
 #define STATE_DIR "/home/root/.local/share/paperboard"
+#endif
 #define ASSET_DIR STATE_DIR "/assets"
 #define CANDIDATE_PATH STATE_DIR "/candidate.png"
 #define LAST_GOOD_PATH STATE_DIR "/dashboard.png"
@@ -31,8 +36,9 @@
 
 enum {
     MSG_REFRESH = 1, MSG_ACCEPT = 2, MSG_REJECT = 3, MSG_DISMISS = 4, MSG_PIN = 5,
+    MSG_UI_STATE = 6, MSG_COMMAND_RESULT = 7, MSG_CANVAS_EVENT = 8,
     MSG_STATUS = 101, MSG_CANDIDATE = 102, MSG_ERROR = 103, MSG_LAST_GOOD = 104,
-    MSG_SNAPSHOT = 105,
+    MSG_SNAPSHOT = 105, MSG_COMMAND = 106, MSG_ACTION_RESULT = 107,
 };
 
 #define MSG_SYSTEM_TERMINATE UINT32_MAX
@@ -220,16 +226,16 @@ static struct curl_slist *authorization_headers(int json) {
     return headers;
 }
 
-static int http_json(const char *url, const char *post_data, struct buffer *response, long timeout) {
+static int http_json_method(const char *url, const char *method, const char *data, struct buffer *response, long timeout) {
     CURL *curl = curl_easy_init();
-    struct curl_slist *headers = authorization_headers(post_data != NULL);
+    struct curl_slist *headers = authorization_headers(data != NULL);
     CURLcode result;
     if (curl == NULL || headers == NULL) { curl_easy_cleanup(curl); curl_slist_free_all(headers); return -1; }
     configure_curl(curl, url, headers, timeout);
-    if (post_data != NULL) {
-        curl_easy_setopt(curl, CURLOPT_POST, 1L);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_data);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)strlen(post_data));
+    if (method != NULL) curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method);
+    if (data != NULL) {
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)strlen(data));
     }
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_buffer);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, response);
@@ -237,6 +243,10 @@ static int http_json(const char *url, const char *post_data, struct buffer *resp
     last_download_result = result;
     curl_easy_cleanup(curl); curl_slist_free_all(headers);
     return result == CURLE_OK ? 0 : -1;
+}
+
+static int http_json(const char *url, const char *post_data, struct buffer *response, long timeout) {
+    return http_json_method(url, post_data == NULL ? NULL : "POST", post_data, response, timeout);
 }
 
 static int validate_png_path(const char *path, char *error, size_t error_capacity) {
@@ -330,6 +340,20 @@ static void attach_assets(struct json_object *root) {
     }
 }
 
+#ifdef CANVAS_MODE
+static void attach_canvas_assets(struct json_object *root) {
+    struct json_object *session, *messages, *wrapper;
+    if (!json_object_object_get_ex(root, "session", &session) || json_object_is_type(session, json_type_null) ||
+        !json_object_object_get_ex(session, "messages", &messages) || !json_object_is_type(messages, json_type_array)) return;
+    wrapper = json_object_new_object();
+    json_object_get(messages);
+    json_object_object_add(wrapper, "cards", messages);
+    attach_assets(wrapper);
+    json_object_put(wrapper);
+}
+#endif
+
+#ifndef CANVAS_MODE
 static void cleanup_assets(struct json_object *root) {
     struct json_object *cards;
     struct dirent *entry;
@@ -352,6 +376,7 @@ static void cleanup_assets(struct json_object *root) {
     }
     closedir(directory);
 }
+#endif
 
 static void persist_snapshot(const char *json) {
     char temporary[] = SNAPSHOT_PATH ".tmp";
@@ -378,31 +403,54 @@ static void send_cached_snapshot(void) {
     buffer.data[buffer.length] = '\0'; send_message(MSG_SNAPSHOT, buffer.data); free(buffer.data);
 }
 
+#ifndef CANVAS_MODE
 static void relay_ack(long long cursor) {
     char url[4600], body[80]; struct buffer response = { 0 };
     snprintf(url, sizeof(url), "%s/v1/device/%s/ack", config.relay_url, config.device_id);
     snprintf(body, sizeof(body), "{\"cursor\":%lld}", cursor);
     (void)http_json(url, body, &response, 10L); free(response.data);
 }
+#endif
 
 static int relay_poll_once(long long cursor) {
-    char url[4600]; struct buffer response = { 0 }; struct json_object *root, *cursor_object;
+    char url[4600]; struct buffer response = { 0 }; struct json_object *root, *cursor_object, *commands;
     long timeout = config.poll_wait + 15;
+#ifdef CANVAS_MODE
+    snprintf(url, sizeof(url), "%s/v1/device/%s/canvas/poll?cursor=%lld&wait=%ld", config.relay_url, config.device_id, cursor, config.poll_wait);
+#else
     snprintf(url, sizeof(url), "%s/v1/device/%s/poll?cursor=%lld&wait=%ld", config.relay_url, config.device_id, cursor, config.poll_wait);
+#endif
     if (http_json(url, NULL, &response, timeout) != 0) { free(response.data); return -1; }
     root = json_tokener_parse(response.data == NULL ? "" : response.data);
     free(response.data);
     if (root == NULL || !json_object_is_type(root, json_type_object) ||
         !json_object_object_get_ex(root, "cursor", &cursor_object)) { json_object_put(root); return -1; }
     relay_cursor = json_object_get_int64(cursor_object);
+#ifndef CANVAS_MODE
+    if (json_object_object_get_ex(root, "commands", &commands) && json_object_is_type(commands, json_type_array)) {
+        size_t index, count = json_object_array_length(commands);
+        for (index = 0; index < count; index++) {
+            struct json_object *command = json_object_array_get_idx(commands, index);
+            send_message(MSG_COMMAND, json_object_to_json_string_ext(command, JSON_C_TO_STRING_PLAIN));
+        }
+    }
+#else
+    (void)commands;
+#endif
+#ifdef CANVAS_MODE
+    attach_canvas_assets(root);
+#else
     attach_assets(root);
     cleanup_assets(root);
+#endif
     {
         const char *serialized = json_object_to_json_string_ext(root, JSON_C_TO_STRING_PLAIN);
         persist_snapshot(serialized);
         send_message(MSG_SNAPSHOT, serialized);
     }
+#ifndef CANVAS_MODE
     relay_ack(relay_cursor);
+#endif
     json_object_put(root);
     return 0;
 }
@@ -427,8 +475,39 @@ static void relay_action(const char *card_id, const char *action) {
     if (!valid_id(card_id)) { send_message(MSG_ERROR, "Card identifier is invalid."); return; }
     snprintf(url, sizeof(url), "%s/v1/device/%s/cards/%s/%s", config.relay_url, config.device_id, card_id, action);
     if (http_json(url, "{}", &response, 15L) != 0) send_message(MSG_ERROR, "Card action failed; queue retained.");
-    else force_refresh = 1;
+    else { send_message(MSG_ACTION_RESULT, action); force_refresh = 1; }
     free(response.data);
+}
+
+static void relay_ui_state(const char *body) {
+    char url[4600]; struct buffer response = { 0 };
+    snprintf(url, sizeof(url), "%s/v1/device/%s/ui-state", config.relay_url, config.device_id);
+    if (http_json_method(url, "PUT", body, &response, 10L) != 0)
+        send_message(MSG_ERROR, "Could not report visible tablet state.");
+    free(response.data);
+}
+
+static void relay_command_result(const char *body) {
+    struct json_object *root = json_tokener_parse(body), *id_object;
+    const char *id; char url[4700]; struct buffer response = { 0 };
+    if (root == NULL || !json_object_object_get_ex(root, "id", &id_object) ||
+        !valid_id(id = json_object_get_string(id_object))) { json_object_put(root); return; }
+    snprintf(url, sizeof(url), "%s/v1/device/%s/commands/%s/result", config.relay_url, config.device_id, id);
+    (void)http_json(url, body, &response, 10L);
+    free(response.data); json_object_put(root);
+}
+
+static void relay_canvas_event(const char *body) {
+    struct json_object *root = json_tokener_parse(body), *session_object;
+    const char *session; char url[4700]; struct buffer response = { 0 };
+    if (root == NULL || !json_object_object_get_ex(root, "session_id", &session_object) ||
+        !valid_id(session = json_object_get_string(session_object))) { json_object_put(root); return; }
+    json_object_object_del(root, "session_id");
+    snprintf(url, sizeof(url), "%s/v1/device/%s/canvas/sessions/%s/events", config.relay_url, config.device_id, session);
+    if (http_json(url, json_object_to_json_string_ext(root, JSON_C_TO_STRING_PLAIN), &response, 10L) == 0)
+        send_message(MSG_ACTION_RESULT, "Response sent");
+    else send_message(MSG_ERROR, "Response could not be sent");
+    free(response.data); json_object_put(root);
 }
 
 static void accept_candidate(void) {
@@ -472,6 +551,9 @@ int main(int argc, char **argv) {
         else if (header.type == MSG_REJECT && !config.relay_mode) { unlink(CANDIDATE_PATH); send_message(MSG_ERROR, "Qt rejected candidate; last-good retained."); }
         else if (header.type == MSG_DISMISS && config.relay_mode) relay_action(contents, "dismiss");
         else if (header.type == MSG_PIN && config.relay_mode) relay_action(contents, "pin");
+        else if (header.type == MSG_UI_STATE && config.relay_mode) relay_ui_state(contents);
+        else if (header.type == MSG_COMMAND_RESULT && config.relay_mode) relay_command_result(contents);
+        else if (header.type == MSG_CANVAS_EVENT && config.relay_mode) relay_canvas_event(contents);
     }
     stopping = 1; free(contents); close(socket_fd);
     if (!thread_started) curl_global_cleanup();

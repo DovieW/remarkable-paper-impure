@@ -1,0 +1,4 @@
+{
+  "desk_light": { "domain": "light", "service": "toggle", "entity_id": "light.example_desk" },
+  "stop_fan": { "domain": "switch", "service": "turn_off", "entity_id": "switch.example_fan" }
+}
