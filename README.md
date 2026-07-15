@@ -36,6 +36,12 @@ human-facing walkthrough is [Zero-to-running quickstart](docs/agent-quickstart.m
 - `docs/custom-software.md` — a tested Vellum, Xovi, AppLoad, and KOReader
   example for one exact OS version.
 - `docs/resources.md` — official and community starting points.
+- `docs/agent-autonomy.md` — rules and tooling for agents to launch, observe,
+  and verify work themselves while preserving authentication boundaries.
+- `docs/paperboard.md` — build, deploy, and verification guide for the first
+  custom AppLoad dashboard application.
+- `scripts/configure-paperboard.sh` and `scripts/remove-paperboard.sh` — private
+  URL configuration and reversible removal for Paperboard.
 - `PERSONAL.example.md` — template for the ignored local `PERSONAL.md` where
   each owner records device- and network-specific context.
 
@@ -65,6 +71,13 @@ still on that version. Agents must inspect the connected device before writes.
 6. Prepare a recovery route appropriate to the host computer.
 7. Only then evaluate launchers, readers, dashboards, or other applications.
 
+## Paperboard
+
+The first repository-native application is [Paperboard](docs/paperboard.md), a
+full-screen Qt Quick dashboard for AppLoad. It includes an on-demand ARM64
+backend with verified HTTPS-only PNG fetching, decode-before-acceptance, and an
+atomic private last-good cache on Paper Pure OS `3.27.x`.
+
 ## Project rules
 
 - Prefer official documentation, reviewed source, pinned releases, and hashes.
@@ -72,6 +85,8 @@ still on that version. Agents must inspect the connected device before writes.
   account tokens, user documents, or backup data.
 - Put necessary owner-specific operational details in ignored `PERSONAL.md`;
   keep actual credentials in a password manager, not Markdown.
+- Build reusable SSH-only tooling when it removes routine physical handoffs;
+  never automate passcode entry or create an unauthenticated control service.
 - Never assume software for reMarkable 1/2, Paper Pro, or Paper Pro Move works
   on Paper Pure.
 - Every device-changing procedure needs verification and rollback instructions.

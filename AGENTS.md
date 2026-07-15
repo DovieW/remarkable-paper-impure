@@ -57,6 +57,19 @@ private keys, recovery codes, or broadly privileged tokens. Never force-add
 it, quote its values in public documentation, or expose its contents in chat
 unless the user explicitly requests a particular non-secret value.
 
+## Autonomy before interruption
+
+Follow [docs/agent-autonomy.md](docs/agent-autonomy.md). Complete routine
+navigation, launching, screenshot capture, log inspection, and verification
+yourself when reviewed local tooling can do so safely. If a capability is
+missing, prefer building a narrow, reusable SSH-only tool and documenting it
+over repeatedly delegating mechanical steps to the owner.
+
+Do not cross authentication or recovery boundaries. Never request, store, or
+inject the tablet passcode. A human unlock after reboot or lock, cable changes,
+and physical recovery-button sequences are legitimate exceptions. Group such
+requests and keep them minimal.
+
 ## Zero-to-running workflow
 
 ### 1. Human preparation
@@ -64,6 +77,10 @@ unless the user explicitly requests a particular non-secret value.
 Walk the user through [docs/agent-quickstart.md](docs/agent-quickstart.md).
 Developer Mode and unlocking are physical steps. Enabling Developer Mode may
 factory-reset the tablet, so confirm cloud sync or another backup first.
+
+For longer supervised work, ask the owner to connect power, unlock once, and
+temporarily disable Auto sleep while keeping the passcode enabled. Restore the
+normal sleep policy at the end of the session.
 
 ### 2. Establish SSH
 

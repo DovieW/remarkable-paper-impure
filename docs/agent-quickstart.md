@@ -89,3 +89,11 @@ Before choosing software, compare the exact output of `scripts/status.sh`
 with upstream device and OS constraints. The repository's recorded KOReader
 stack worked on OS `3.27.3.0`; that does not establish compatibility with a
 newer release.
+
+## Prepare longer agent sessions
+
+Read [Agent autonomy and physical boundaries](agent-autonomy.md). For a longer
+supervised session, connect the tablet to power, unlock it locally, and
+temporarily disable Auto sleep or select the longest available delay. Keep the
+passcode enabled and never provide it to the agent. Restore Auto sleep and lock
+the device when the session ends.

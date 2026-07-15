@@ -40,6 +40,10 @@ This Paper Pure should be treated as a **personal experimental device**:
   alone makes every service safe.
 - Remember the boundary: the generated local aliases refuse password login,
   but the stock Paper Pure SSH server may still accept its generated root password.
+- Remote-control helpers must remain behind authenticated SSH and must not
+  store or inject the tablet passcode. Do not expose a separate control port.
+- Screenshot artifacts may contain private documents or authentication UI.
+  Keep them in ignored storage and delete them when no longer needed.
   Server-side key-only authentication is a future hardening task that requires
   separate review and recovery planning.
 
@@ -70,6 +74,9 @@ This Paper Pure should be treated as a **personal experimental device**:
 - Prefer files under the persistent home/data partition over modifications to
   the operating-system partition.
 - Make one independently testable change at a time.
+- Prefer reusable, on-demand automation over repeated physical handoffs, but
+  preserve the human boundary for unlocking and recovery-mode actions. See
+  [Agent autonomy](agent-autonomy.md).
 
 ### Updates
 
@@ -99,6 +106,11 @@ before running the change.
 
 The prepared Paper Pure recovery path and its WSL-specific limitation are
 documented in [Paper Pure recovery](recovery.md).
+
+The stock BusyBox `wget` on the tested Paper Pure reports that TLS certificate
+validation is not implemented. Do not use it for sensitive HTTPS transfers.
+Paperboard links libcurl and explicitly enables peer and hostname verification
+against the device CA bundle.
 
 ## If something looks wrong
 

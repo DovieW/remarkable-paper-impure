@@ -10,6 +10,7 @@ config/*.local
 # Device captures and backups may contain private documents or identifiers.
 backups/
 captures/
+build/
 
 # Owner-specific tablet, network, and recovery notes. Use PERSONAL.example.md
 # as the public-safe template; PERSONAL.md must remain local.
