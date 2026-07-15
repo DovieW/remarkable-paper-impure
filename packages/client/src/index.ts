@@ -21,6 +21,12 @@ export class PaperboardClient {
     return response.json();
   }
 
+  private async requestBytes(path: string): Promise<Buffer> {
+    const response = await fetch(`${this.baseUrl}${path}`, { headers: { authorization: `Bearer ${this.options.token}` } });
+    if (!response.ok) throw new Error(`Paperboard HTTP ${response.status}: ${(await response.text()).slice(0, 500)}`);
+    return Buffer.from(await response.arrayBuffer());
+  }
+
   async uploadAsset(device: string, bytes: Buffer, contentType: string): Promise<{ id: string; sha256: string }> {
     const body = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
     return this.request(`/v1/devices/${encodeURIComponent(device)}/assets`, { method: "POST", body, headers: { "content-type": contentType } }) as Promise<{ id: string; sha256: string }>;
@@ -36,6 +42,11 @@ export class PaperboardClient {
   async get(device: string, card: string): Promise<Record<string, unknown>> { return this.request(`/v1/devices/${encodeURIComponent(device)}/cards/${encodeURIComponent(card)}`) as Promise<Record<string, unknown>>; }
   async clear(device: string): Promise<{ removed: number }> { return this.request(`/v1/devices/${encodeURIComponent(device)}/clear`, { method: "POST" }) as Promise<{ removed: number }>; }
   async status(device: string): Promise<Record<string, unknown>> { return this.request(`/v1/devices/${encodeURIComponent(device)}/status`) as Promise<Record<string, unknown>>; }
+  async tabletStatus(device: string): Promise<Record<string, unknown>> { return this.request(`/v1/devices/${encodeURIComponent(device)}/tablet/status`) as Promise<Record<string, unknown>>; }
+  async tabletApps(device: string): Promise<Record<string, unknown>> { return this.request(`/v1/devices/${encodeURIComponent(device)}/tablet/apps`) as Promise<Record<string, unknown>>; }
+  async tabletLaunch(device: string, appId: string): Promise<Record<string, unknown>> { return this.request(`/v1/devices/${encodeURIComponent(device)}/tablet/launch`, { method: "POST", body: JSON.stringify({ app_id: appId }), headers: { "content-type": "application/json" } }) as Promise<Record<string, unknown>>; }
+  async tabletReturn(device: string): Promise<Record<string, unknown>> { return this.request(`/v1/devices/${encodeURIComponent(device)}/tablet/return`, { method: "POST" }) as Promise<Record<string, unknown>>; }
+  async tabletScreenshot(device: string): Promise<Buffer> { return this.requestBytes(`/v1/devices/${encodeURIComponent(device)}/tablet/screenshot`); }
   async command(device: string, action: PaperboardCommandAction): Promise<Record<string, unknown>> { return this.request(`/v1/devices/${encodeURIComponent(device)}/commands`, { method: "POST", body: JSON.stringify({ action }), headers: { "content-type": "application/json" } }) as Promise<Record<string, unknown>>; }
   async commandStatus(device: string, command: string): Promise<Record<string, unknown>> { return this.request(`/v1/devices/${encodeURIComponent(device)}/commands/${encodeURIComponent(command)}`) as Promise<Record<string, unknown>>; }
   async createCanvasSession(device: string, title: string): Promise<Record<string, unknown>> { return this.request(`/v1/devices/${encodeURIComponent(device)}/canvas/sessions`, { method: "POST", body: JSON.stringify({ title }), headers: { "content-type": "application/json" } }) as Promise<Record<string, unknown>>; }

@@ -1,5 +1,22 @@
 # Paperboard relay
 
+## TrueNAS always-on deployment
+
+`deploy/relay/compose.truenas.yml` moves the existing relay identity and durable
+state to a TrueNAS custom app. Stop the WSL relay before copying its SQLite
+database, assets, master key, client/device token state, and Tailscale state.
+Verify archive checksums before starting the TrueNAS app and retain the stopped
+WSL volumes until rollback is no longer needed.
+
+The public tailnet HTTPS listener proxies only the client API. The admin
+listener remains on container loopback. The optional tablet bridge is part of
+the relay process but uses a forced-command SSH key that rejects arbitrary
+shell commands, paths, taps, and passcodes. Screenshot output is streamed from
+the tablet and never written by the relay.
+
+Do not start the TrueNAS deployment with a new Tailscale identity while the old
+relay is still active under the same hostname.
+
 The relay is a small Node.js 24 service backed by SQLite. It stores only the
 current queue, normalized image assets, hashed tokens, encrypted provider
 configuration, idempotency responses, and body-free delivery events.

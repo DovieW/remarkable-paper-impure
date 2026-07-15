@@ -13,6 +13,7 @@ export interface RelayConfig {
   masterKey: Buffer;
   adminToken: string;
   publicBaseUrl: string;
+  tabletBridgeCommand: string | undefined;
 }
 
 function secret(name: string): string | undefined {
@@ -39,5 +40,6 @@ export function loadConfig(overrides: Partial<RelayConfig> = {}): RelayConfig {
     masterKey: overrides.masterKey ?? parseMasterKey(masterKeyValue!),
     adminToken,
     publicBaseUrl: (overrides.publicBaseUrl ?? process.env.PAPERBOARD_PUBLIC_BASE_URL ?? "https://paperboard.invalid").replace(/\/$/, ""),
+    tabletBridgeCommand: overrides.tabletBridgeCommand ?? process.env.PAPERBOARD_TABLET_BRIDGE_COMMAND,
   };
 }

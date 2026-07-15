@@ -40,7 +40,7 @@ human-facing walkthrough is [Zero-to-running quickstart](docs/agent-quickstart.m
   and verify work themselves while preserving authentication boundaries.
 - `docs/paperboard.md` — the private output queue and Paper Pure application.
 - `docs/canvas.md` — the manually opened interactive touch UI for agent sessions.
-- `docs/home-assistant.md` — the risk-tiered, allowlisted Canvas adapter.
+- `docs/home-assistant.md` — the risk-tiered, allowlisted Paperboard Canvas adapter.
 - `docs/relay.md` — hardened relay deployment for WSL/Windows or Linux.
 - `docs/agent-tools.md` — generic CLI and MCP tools for any AI agent.
 - `docs/providers.md` — TRMNL Hosted BYOD and Terminus integration.

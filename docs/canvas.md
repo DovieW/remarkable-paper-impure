@@ -1,6 +1,6 @@
-# Canvas
+# Paperboard Canvas
 
-Canvas is the interactive companion to Paperboard. Paperboard remains a quiet,
+Paperboard Canvas is the interactive companion to Paperboard. Paperboard remains a quiet,
 queue-oriented ambient display. Canvas is opened manually from AppLoad when a
 person wants a short touch conversation with an agent or automation.
 
@@ -32,11 +32,11 @@ scripts/deploy-canvas.sh --dry-run
 scripts/deploy-canvas.sh
 ```
 
-Canvas reuses Paperboard's reviewed TLS-authenticated device transport and
+Paperboard Canvas reuses Paperboard's reviewed TLS-authenticated device transport and
 private device configuration. Deployment is constrained to the observed Paper
 Pure platform and OS 3.27.x. It never launches itself or steals focus. Reload
 AppLoad, then open Canvas manually.
 
-If Canvas misbehaves, return to AppLoad and remove only
+If Paperboard Canvas misbehaves, return to AppLoad and remove only
 `/home/root/xovi/exthome/appload/canvas`. This does not touch Paperboard, the
 stock UI, user documents, boot, or recovery partitions.

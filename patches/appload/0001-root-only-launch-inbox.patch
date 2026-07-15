@@ -1,0 +1,37 @@
+diff --git a/src/Launcher.h b/src/Launcher.h
+index d897ebe..75da999 100644
+--- a/src/Launcher.h
++++ b/src/Launcher.h
+@@ -5,7 +5,31 @@
+ class AppLoadLauncher : public QObject {
+     Q_OBJECT
+ public:
+-    explicit AppLoadLauncher(QObject *parent = nullptr): QObject(parent) {}
++    explicit AppLoadLauncher(QObject *parent = nullptr): QObject(parent) {
++        // A deliberately tiny host-control adapter. The containing directory
++        // is installed root-only; no shell, arguments, or environment cross
++        // this boundary. An atomic rename publishes one validated app ID.
++        QDir().mkpath("/run/paperboard-appload");
++        QFile::setPermissions("/run/paperboard-appload", QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
++        auto *timer = new QTimer(this);
++        connect(timer, &QTimer::timeout, this, [this]() {
++            static const QString path = "/run/paperboard-appload/launch";
++            QFile request(path);
++            if (!request.exists() || !request.open(QIODevice::ReadOnly | QIODevice::Text)) {
++                return;
++            }
++            const QString id = QString::fromUtf8(request.readAll()).trimmed();
++            request.close();
++            QFile::remove(path);
++            static const QRegularExpression allowed("^(external::)?[A-Za-z0-9][A-Za-z0-9._-]{0,126}$");
++            if (!allowed.match(id).hasMatch()) {
++                qWarning() << "Rejected invalid Paperboard AppLoad request";
++                return;
++            }
++            emit requestLaunch(id, {}, {}, false);
++        });
++        timer->start(250);
++    }
+     static QObject *qmlSingleton(QQmlEngine *engine, QJSEngine *scriptEngine) {
+         (void) engine;
+         (void) scriptEngine;

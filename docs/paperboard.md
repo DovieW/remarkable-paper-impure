@@ -27,7 +27,8 @@ remain in ignored mode-0600 files.
 - Authenticated long polling with cursor acknowledgements and offline catch-up.
 - TRMNL Hosted BYOD and self-hosted Terminus as optional ambient providers.
 - Client-scoped API, CLI, and MCP parity for cards, delivery status,
-  foreground navigation, and the separate interactive Canvas application.
+  foreground navigation, and the separate interactive Paperboard Canvas
+  application.
 - No background display takeover. The app and relay polling client exist only
   while Paperboard is in the foreground.
 

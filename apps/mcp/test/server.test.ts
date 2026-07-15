@@ -17,6 +17,11 @@ test("lists the agent tools and maps progress input to a replaceable card", asyn
     status: async () => ({ queued: 1 }),
     command: async () => ({ id: "command-12345678", status: "queued" }),
     commandStatus: async () => ({ id: "command-12345678", status: "completed" }),
+    tabletStatus: async () => ({ foreground: "paperboard" }),
+    tabletApps: async () => ({ apps: ["paperboard", "canvas"] }),
+    tabletLaunch: async () => ({ launched: "paperboard" }),
+    tabletReturn: async () => ({ returned: true }),
+    tabletScreenshot: async () => Buffer.from("89504e470d0a1a0a", "hex"),
     createCanvasSession: async () => ({ id: "session-12345678" }),
     listCanvasSessions: async () => ({ sessions: [] }),
     getCanvasSession: async () => ({ id: "session-12345678", messages: [] }),
@@ -36,6 +41,7 @@ test("lists the agent tools and maps progress input to a replaceable card", asyn
     "canvas_ack", "canvas_close", "canvas_events", "canvas_list", "canvas_send", "canvas_start", "canvas_status",
     "paperboard_clear", "paperboard_control", "paperboard_delete", "paperboard_get", "paperboard_list",
     "paperboard_show", "paperboard_show_image", "paperboard_status", "paperboard_update", "paperboard_wait",
+    "tablet_apps", "tablet_launch", "tablet_return", "tablet_screenshot", "tablet_status",
   ]);
   const response = await client.callTool({ name: "paperboard_show", arguments: {
     device: "paper-pure", title: "Building", body: "Almost there", progress: 42,

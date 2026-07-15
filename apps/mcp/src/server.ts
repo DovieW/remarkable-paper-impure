@@ -6,7 +6,7 @@ import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import { z } from "zod";
 
-export type PaperboardToolClient = Pick<PaperboardClient, "uploadAsset" | "show" | "update" | "list" | "get" | "delete" | "clear" | "status" | "command" | "commandStatus" | "createCanvasSession" | "listCanvasSessions" | "getCanvasSession" | "sendCanvasMessage" | "canvasEvents" | "acknowledgeCanvasEvent" | "closeCanvasSession">;
+export type PaperboardToolClient = Pick<PaperboardClient, "uploadAsset" | "show" | "update" | "list" | "get" | "delete" | "clear" | "status" | "command" | "commandStatus" | "tabletStatus" | "tabletApps" | "tabletLaunch" | "tabletReturn" | "tabletScreenshot" | "createCanvasSession" | "listCanvasSessions" | "getCanvasSession" | "sendCanvasMessage" | "canvasEvents" | "acknowledgeCanvasEvent" | "closeCanvasSession">;
 
 const result = (value: unknown) => ({
   content: [{ type: "text" as const, text: JSON.stringify(value) }],
@@ -79,6 +79,15 @@ export function createPaperboardMcpServer(client: PaperboardToolClient): McpServ
     const deadline = Date.now() + timeout_seconds * 1000;
     while (Date.now() < deadline) { const state = await client.status(device); const visible = state.visible_card as { id?: string } | null | undefined; if (until === "visible" && visible?.id === card) return result(state); const item = await client.get(device, card) as { cursor?: number }; if (until === "acknowledged" && item.cursor !== undefined && Number(state.last_ack_cursor ?? 0) >= item.cursor) return result(state); await new Promise((resolve) => setTimeout(resolve, 1000)); }
     throw new Error(`Timed out waiting for ${until}`);
+  });
+
+  server.registerTool("tablet_status", { title: "Tablet status", description: "Read the foreground application and safe tablet-control capability state.", inputSchema: { device: z.string() } }, async ({ device }) => result(await client.tabletStatus(device)));
+  server.registerTool("tablet_apps", { title: "List tablet applications", description: "List installed AppLoad package identifiers that are eligible for explicit launch.", inputSchema: { device: z.string() } }, async ({ device }) => result(await client.tabletApps(device)));
+  server.registerTool("tablet_launch", { title: "Launch tablet application", description: "Explicitly foreground one installed AppLoad package. This cannot unlock the tablet.", inputSchema: { device: z.string(), app_id: z.string() } }, async ({ device, app_id }) => result(await client.tabletLaunch(device, app_id)));
+  server.registerTool("tablet_return", { title: "Return tablet", description: "Return from a custom application to AppLoad or the stock interface.", inputSchema: { device: z.string() } }, async ({ device }) => result(await client.tabletReturn(device)));
+  server.registerTool("tablet_screenshot", { title: "Capture tablet screen", description: "Return one ephemeral PNG of the current unlocked tablet screen; the relay does not retain it.", inputSchema: { device: z.string() } }, async ({ device }) => {
+    const png = await client.tabletScreenshot(device);
+    return { content: [{ type: "image" as const, data: png.toString("base64"), mimeType: "image/png" }], structuredContent: { mime_type: "image/png", bytes: png.length } };
   });
 
   server.registerTool("canvas_start", { title: "Start Canvas session", description: "Create a manually opened interactive Canvas conversation.", inputSchema: { device: z.string(), title: z.string() } }, async ({ device, title }) => result(await client.createCanvasSession(device, title)));

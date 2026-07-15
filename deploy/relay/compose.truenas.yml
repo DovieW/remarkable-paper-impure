@@ -1,0 +1,53 @@
+name: paperboard
+
+services:
+  tailscale:
+    image: tailscale/tailscale:stable@sha256:d54b2e6a9c09f0e5ec52e82b9ad4af3d446b54a7c08075e92f11c39dd410105f
+    hostname: ${PAPERBOARD_TS_HOSTNAME:-paperboard}
+    environment:
+      TS_AUTHKEY: ${PAPERBOARD_TS_AUTHKEY:-}
+      TS_AUTH_ONCE: "true"
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"
+      TS_SERVE_CONFIG: /config/serve.json
+    devices: [/dev/net/tun:/dev/net/tun]
+    cap_add: [NET_ADMIN]
+    volumes:
+      - ${PAPERBOARD_TS_STATE_DIR:?set persistent Tailscale state directory}:/var/lib/tailscale
+      - ./tailscale:/config:ro
+    restart: unless-stopped
+
+  relay:
+    build:
+      context: ../..
+      dockerfile: apps/relay/Dockerfile
+    network_mode: service:tailscale
+    environment:
+      PAPERBOARD_HOST: 0.0.0.0
+      PAPERBOARD_PORT: 8787
+      PAPERBOARD_ADMIN_HOST: 127.0.0.1
+      PAPERBOARD_ADMIN_PORT: 8788
+      PAPERBOARD_DATA_DIR: /data
+      PAPERBOARD_PUBLIC_BASE_URL: ${PAPERBOARD_PUBLIC_BASE_URL:?set private tailnet URL}
+      PAPERBOARD_MASTER_KEY_FILE: /run/secrets/master_key
+      PAPERBOARD_ADMIN_TOKEN_FILE: /run/secrets/admin_token
+      PAPERBOARD_TABLET_BRIDGE_COMMAND: /usr/local/bin/paperboard-tablet-bridge
+    secrets: [master_key, admin_token]
+    volumes:
+      - ${PAPERBOARD_DATA_DIR:?set persistent relay data directory}:/data
+      - ${PAPERBOARD_TABLET_SSH_DIR:?set restricted SSH directory}:/app/.ssh:ro
+      - ${PAPERBOARD_TABLET_BRIDGE_CONFIG:?set bridge config path}:/etc/paperboard/tablet-bridge.conf:ro
+    depends_on: [tailscale]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp:size=64m,mode=1777]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID]
+    group_add: ["${PAPERBOARD_SECRET_GID:?set host secret group}"]
+
+secrets:
+  master_key:
+    file: ${PAPERBOARD_MASTER_KEY_FILE:?set master-key file}
+  admin_token:
+    file: ${PAPERBOARD_ADMIN_TOKEN_FILE:?set admin-token file}

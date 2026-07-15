@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -7,12 +7,13 @@ import sharp from "sharp";
 import { buildServer } from "../src/server.js";
 import type { RelayConfig } from "../src/config.js";
 
-function fixture() {
+function fixture(tabletBridgeCommand?: string) {
   const root = mkdtempSync(join(tmpdir(), "paperboard-test-"));
   const config: RelayConfig = {
     host: "127.0.0.1", port: 0, adminHost: "127.0.0.1", adminPort: 0, dataDir: root, databasePath: join(root, "test.sqlite"),
     assetsDir: join(root, "assets"), masterKey: Buffer.alloc(32, 9), adminToken: "admin-test-token-with-enough-entropy",
     publicBaseUrl: "https://paperboard.example",
+    tabletBridgeCommand,
   };
   const server = buildServer(config);
   return { ...server, config, root };
@@ -21,10 +22,43 @@ function fixture() {
 async function provision(adminApp: ReturnType<typeof buildServer>["adminApp"], adminToken: string, device = "pure-one") {
   const deviceResponse = await adminApp.inject({ method: "POST", url: "/admin/devices", headers: { authorization: `Bearer ${adminToken}` }, payload: { id: device } });
   assert.equal(deviceResponse.statusCode, 201);
-  const clientResponse = await adminApp.inject({ method: "POST", url: "/admin/clients", headers: { authorization: `Bearer ${adminToken}` }, payload: { id: `agent-${device}`, scopes: ["cards:read", "cards:write", "cards:clear", "status:read", "paperboard:control", "canvas:read", "canvas:write"] } });
+  const clientResponse = await adminApp.inject({ method: "POST", url: "/admin/clients", headers: { authorization: `Bearer ${adminToken}` }, payload: { id: `agent-${device}`, scopes: ["cards:read", "cards:write", "cards:clear", "status:read", "paperboard:control", "canvas:read", "canvas:write", "device:apps", "device:control", "screen:read"] } });
   assert.equal(clientResponse.statusCode, 201);
   return { deviceToken: deviceResponse.json().token as string, clientToken: clientResponse.json().token as string };
 }
+
+test("tablet bridge is scope protected and validates installed-app control responses", async (context) => {
+  const root = mkdtempSync(join(tmpdir(), "paperboard-bridge-"));
+  const bridge = join(root, "bridge.sh");
+  writeFileSync(bridge, `#!/bin/sh
+device=$1; action=$2; value=$3
+case "$action" in
+  status) printf '{"foreground":"stock"}' ;;
+  apps) printf '{"apps":["paperboard","canvas"]}' ;;
+  launch) printf '{"launched":"%s"}' "$value" ;;
+  return) printf '{"returned":true}' ;;
+  screenshot) printf '\\211PNG\\r\\n\\032\\nbody' ;;
+  *) exit 2 ;;
+esac
+`, { mode: 0o700 });
+  chmodSync(bridge, 0o700);
+  const current = fixture(bridge);
+  context.after(async () => { await current.adminApp.close(); await current.app.close(); rmSync(current.root, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); });
+  const credentials = await provision(current.adminApp, current.config.adminToken);
+  const headers = { authorization: `Bearer ${credentials.clientToken}` };
+  const apps = await current.app.inject({ method: "GET", url: "/v1/devices/pure-one/tablet/apps", headers });
+  assert.equal(apps.statusCode, 200);
+  assert.deepEqual(apps.json().apps, ["paperboard", "canvas"]);
+  const invalid = await current.app.inject({ method: "POST", url: "/v1/devices/pure-one/tablet/launch", headers, payload: { app_id: "../../bin/sh" } });
+  assert.equal(invalid.statusCode, 400);
+  const launched = await current.app.inject({ method: "POST", url: "/v1/devices/pure-one/tablet/launch", headers, payload: { app_id: "paperboard" } });
+  assert.equal(launched.statusCode, 200);
+  assert.equal(launched.json().launched, "paperboard");
+  const screenshot = await current.app.inject({ method: "GET", url: "/v1/devices/pure-one/tablet/screenshot", headers });
+  assert.equal(screenshot.statusCode, 200);
+  assert.equal(screenshot.headers["cache-control"], "no-store");
+  assert.equal(screenshot.rawPayload.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
+});
 
 test("card lifecycle is authenticated, idempotent, ordered, and isolated", async (context) => {
   const current = fixture();

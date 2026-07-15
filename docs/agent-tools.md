@@ -53,11 +53,32 @@ Available tools:
   cards, enter/leave ambient mode, show/hide controls, refresh, or return.
 - `canvas_start`, `canvas_list`, `canvas_status`, `canvas_send`,
   `canvas_events`, `canvas_ack`, and `canvas_close` — run structured interactive
-  Canvas conversations.
+  Paperboard Canvas conversations.
+- `tablet_status` and `tablet_apps` — report foreground state and enumerate
+  installed AppLoad package identifiers through the restricted relay bridge.
+- `tablet_launch` and `tablet_return` — explicitly change the foreground app;
+  they never run as a side effect of queueing a card or starting a session.
+- `tablet_screenshot` — return one on-demand PNG and retain no relay or tablet
+  copy after the response completes.
 
 The client CLI exposes the same client-scoped operations. Administrative token,
 device provisioning, provider credentials, and client-scope changes remain out
 of MCP on purpose.
+
+Tablet operations require separate `device:apps`, `device:control`, and
+`screen:read` scopes. The relay invokes a forced-command SSH key; OpenClaw does
+not receive the tablet key or a shell. App launching uses the reviewed
+root-only AppLoad inbox built by `scripts/build-appload-control.sh`. It accepts
+only an installed application ID and exposes no shell, arguments, or
+environment. Installing it replaces the firmware-sensitive AppLoad extension
+and restarts the stock UI, so first run a tablet backup and the installer's dry
+run.
+
+To disable the control inbox, restore the timestamped upstream extension with
+`scripts/restore-appload-control.sh --backup appload.so.TIMESTAMP --dry-run`,
+then repeat without `--dry-run`. This restarts the stock UI. Rebuild and
+revalidate the patch whenever AppLoad, Xovi, or the reMarkable OS changes; do
+not carry the binary across firmware versions by assumption.
 
 ## Trusted-host tablet companion
 

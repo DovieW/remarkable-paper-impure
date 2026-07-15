@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { extname } from "node:path";
 import { parseArgs } from "node:util";
 import { PaperboardAdminClient, PaperboardClient } from "@paperboard/client";
@@ -59,6 +59,11 @@ async function main(): Promise<void> {
   if (command === "delete") { const { values } = parseArgs({ args: rest, options: { device: { type: "string" }, card: { type: "string" } } }); await client().delete(required(values.device, "--device"), required(values.card, "--card")); output({ deleted: values.card }); return; }
   if (command === "clear") { const { values } = parseArgs({ args: rest, options: { device: { type: "string" } } }); output(await client().clear(required(values.device, "--device"))); return; }
   if (command === "status") { const { values } = parseArgs({ args: rest, options: { device: { type: "string" } } }); output(await client().status(required(values.device, "--device"))); return; }
+  if (command === "tablet" && rest[0] === "status") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" } } }); output(await client().tabletStatus(required(values.device, "--device"))); return; }
+  if (command === "tablet" && rest[0] === "apps") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" } } }); output(await client().tabletApps(required(values.device, "--device"))); return; }
+  if (command === "tablet" && rest[0] === "launch") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, app: { type: "string" } } }); output(await client().tabletLaunch(required(values.device, "--device"), required(values.app, "--app"))); return; }
+  if (command === "tablet" && rest[0] === "return") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" } } }); output(await client().tabletReturn(required(values.device, "--device"))); return; }
+  if (command === "tablet" && rest[0] === "screenshot") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, output: { type: "string" } } }); const path = required(values.output, "--output"); await writeFile(path, await client().tabletScreenshot(required(values.device, "--device")), { mode: 0o600 }); output({ path }); return; }
   if (command === "wait") { const { values } = parseArgs({ args: rest, options: { device: { type: "string" }, card: { type: "string" }, until: { type: "string" }, timeout: { type: "string" } } }); const until = values.until ?? "acknowledged"; if (until !== "acknowledged" && until !== "visible") throw new Error("--until must be acknowledged or visible"); output(await waitFor(required(values.device, "--device"), until, values.card, Number(values.timeout ?? 30))); return; }
   if (command === "control") { const { values } = parseArgs({ args: rest, options: { device: { type: "string" }, action: { type: "string" }, wait: { type: "boolean" } } }); const created = await client().command(required(values.device, "--device"), required(values.action, "--action") as Parameters<PaperboardClient["command"]>[1]); if (!values.wait) { output(created); return; } const id = required(String(created.id ?? ""), "command id"); for (let attempt = 0; attempt < 20; attempt++) { const state = await client().commandStatus(values.device!, id); if (["completed", "failed", "expired"].includes(String(state.status))) { output(state); return; } await pause(250); } throw new Error("command did not complete"); }
   if (command === "device" && rest[0] === "create") { const { values } = parseArgs({ args: rest.slice(1), options: { id: { type: "string" } } }); output(await admin().createDevice(required(values.id, "--id"))); return; }
@@ -81,7 +86,7 @@ async function main(): Promise<void> {
   if (command === "canvas" && rest[0] === "events") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, session: { type: "string" }, after: { type: "string" } } }); output(await client().canvasEvents(required(values.device, "--device"), required(values.session, "--session"), Number(values.after ?? 0))); return; }
   if (command === "canvas" && rest[0] === "ack") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, session: { type: "string" }, event: { type: "string" } } }); await client().acknowledgeCanvasEvent(required(values.device, "--device"), required(values.session, "--session"), required(values.event, "--event")); output({ acknowledged: values.event }); return; }
   if (command === "canvas" && rest[0] === "close") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, session: { type: "string" } } }); output(await client().closeCanvasSession(required(values.device, "--device"), required(values.session, "--session"))); return; }
-  process.stderr.write("Usage: paperboard <show|update|list|get|delete|clear|status|wait|control|canvas|device create|client create|client scopes|token rotate|provider set> [options]\n");
+  process.stderr.write("Usage: paperboard <show|update|list|get|delete|clear|status|wait|control|canvas|tablet|device create|client create|client scopes|token rotate|provider set> [options]\n");
   process.exitCode = 2;
 }
 

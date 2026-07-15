@@ -26,4 +26,4 @@ test ! -d /home/root/xovi/exthome/appload/canvas || mv /home/root/xovi/exthome/a
 mv "$stage" /home/root/xovi/exthome/appload/canvas
 REMOTE
 trap - EXIT
-printf 'Canvas deployed. Use AppLoad Reload before launching it.\n'
+printf 'Paperboard Canvas deployed. Use AppLoad Reload before launching it.\n'

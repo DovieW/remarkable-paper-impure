@@ -59,8 +59,11 @@ export const devicePollQuerySchema = z.object({
 
 export const clientScopeSchema = z.enum([
   "cards:read", "cards:write", "cards:clear", "status:read", "paperboard:control",
-  "canvas:read", "canvas:write",
+  "canvas:read", "canvas:write", "device:apps", "device:control", "screen:read",
 ]);
+
+export const tabletAppIdSchema = z.string().regex(/^(?:external::)?[a-zA-Z0-9][a-zA-Z0-9._-]{0,126}$/);
+export const tabletLaunchSchema = z.object({ app_id: tabletAppIdSchema });
 
 export const paperboardCommandActionSchema = z.enum([
   "previous", "next", "select_ambient", "leave_ambient", "show_controls",
@@ -123,6 +126,7 @@ export type PaperboardUiState = z.infer<typeof paperboardUiStateSchema>;
 export type CanvasMessageInput = z.infer<typeof canvasMessageInputSchema>;
 export type CanvasSessionInput = z.infer<typeof canvasSessionInputSchema>;
 export type CanvasEventInput = z.infer<typeof canvasEventInputSchema>;
+export type TabletLaunchInput = z.infer<typeof tabletLaunchSchema>;
 
 export interface DeliveryCard {
   id: string;

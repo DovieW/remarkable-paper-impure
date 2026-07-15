@@ -2,13 +2,14 @@ import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
-import { canvasEventInputSchema, canvasMessageInputSchema, canvasSessionInputSchema, cardInputSchema, cardPatchSchema, clientScopeSchema, commandResultSchema, DEVICE_ID_PATTERN, devicePollQuerySchema, hashToken, issueToken, paperboardCommandSchema, paperboardUiStateSchema, providerSchema } from "@paperboard/core";
+import { canvasEventInputSchema, canvasMessageInputSchema, canvasSessionInputSchema, cardInputSchema, cardPatchSchema, clientScopeSchema, commandResultSchema, DEVICE_ID_PATTERN, devicePollQuerySchema, hashToken, issueToken, paperboardCommandSchema, paperboardUiStateSchema, providerSchema, tabletLaunchSchema } from "@paperboard/core";
 import { z } from "zod";
 import { requireAdmin, requireDevice, requireScope } from "./auth.js";
 import type { RelayConfig } from "./config.js";
 import { MAX_INPUT_BYTES, normalizeImage, SCREEN_HEIGHT, SCREEN_WIDTH } from "./images.js";
 import { ProviderManager } from "./providers.js";
 import { Store } from "./store.js";
+import { TabletBridge } from "./tablet.js";
 
 const deviceParamSchema = z.object({ device: z.string().regex(DEVICE_ID_PATTERN) });
 const cardParamSchema = deviceParamSchema.extend({ card: z.string().min(8).max(80) });
@@ -35,6 +36,7 @@ export function buildServer(config: RelayConfig): RelayServer {
   const adminApp = Fastify({ logger: true, bodyLimit: 1024 * 1024 });
   const store = new Store(config.databasePath, config.assetsDir);
   const providers = new ProviderManager(store, config.masterKey, config.publicBaseUrl);
+  const tablet = new TabletBridge(config.tabletBridgeCommand);
   const changes = new EventEmitter();
   changes.setMaxListeners(1000);
 
@@ -167,6 +169,36 @@ export function buildServer(config: RelayConfig): RelayServer {
         controls_visible: ui?.controls_visible ?? false, rendered_cursor: ui?.rendered_cursor ?? null,
         last_action: ui?.last_action ?? "", last_result: ui?.last_result ?? "", ui_updated_at: ui?.updated_at ?? null };
     } catch (error) { return bad(reply, error); }
+  });
+
+  app.get("/v1/devices/:device/tablet/status", async (request, reply) => {
+    if (!client(request, "status:read")) return deny(reply);
+    try { const { device } = deviceParamSchema.parse(request.params); return await tablet.status(device); }
+    catch (error) { return bad(reply, error); }
+  });
+
+  app.get("/v1/devices/:device/tablet/apps", async (request, reply) => {
+    if (!client(request, "device:apps")) return deny(reply);
+    try { const { device } = deviceParamSchema.parse(request.params); return await tablet.apps(device); }
+    catch (error) { return bad(reply, error); }
+  });
+
+  app.post("/v1/devices/:device/tablet/launch", async (request, reply) => {
+    if (!client(request, "device:control")) return deny(reply);
+    try { const { device } = deviceParamSchema.parse(request.params); const { app_id } = tabletLaunchSchema.parse(request.body); return await tablet.launch(device, app_id); }
+    catch (error) { return bad(reply, error); }
+  });
+
+  app.post("/v1/devices/:device/tablet/return", async (request, reply) => {
+    if (!client(request, "device:control")) return deny(reply);
+    try { const { device } = deviceParamSchema.parse(request.params); return await tablet.return(device); }
+    catch (error) { return bad(reply, error); }
+  });
+
+  app.get("/v1/devices/:device/tablet/screenshot", async (request, reply) => {
+    if (!client(request, "screen:read")) return deny(reply);
+    try { const { device } = deviceParamSchema.parse(request.params); return reply.type("image/png").header("cache-control", "no-store").send(await tablet.screenshot(device)); }
+    catch (error) { return bad(reply, error); }
   });
 
   app.post("/v1/devices/:device/commands", async (request, reply) => {
