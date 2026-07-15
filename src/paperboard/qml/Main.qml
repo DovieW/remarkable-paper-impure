@@ -39,7 +39,9 @@ Rectangle {
     property string backendDetail: "Waiting for the private relay"
     property string pendingSnapshot: ""
     property double lastAppliedAt: 0
-    property int changedFrames: 0
+    property int partialChanges: 0
+    property bool dirtySinceFullRefresh: false
+    property double lastFullRefreshAt: 0
     property bool legacyCandidate: false
     property bool controlsVisible: false
     property bool ambientMode: false
@@ -47,20 +49,38 @@ Rectangle {
     property string lastAction: ""
     property string lastResult: ""
 
+    function fullRefresh() {
+        partialChanges = 0
+        dirtySinceFullRefresh = false
+        lastFullRefreshAt = Date.now()
+        requestFullRefresh()
+    }
+
+    function visualChanged(weight) {
+        partialChanges += weight || 1
+        dirtySinceFullRefresh = true
+        if (partialChanges >= 7) fullRefresh()
+    }
+
     function showToast(text) {
         toastText = text
         toastTimer.restart()
+        visualChanged(1)
     }
 
     function showControls() {
+        if (controlsVisible) { chromeTimer.restart(); return }
         controlsVisible = true
         chromeTimer.restart()
+        visualChanged(1)
         reportState()
     }
 
     function hideControls() {
+        if (!controlsVisible) return
         controlsVisible = false
         chromeTimer.stop()
+        visualChanged(1)
         reportState()
     }
 
@@ -87,10 +107,9 @@ Rectangle {
         backendState = cards.length > 0 ? "LIVE" : "CLEAR"
         backendDetail = cards.length > 0 ? cards.length + " queued card" + (cards.length === 1 ? "" : "s") : "No queued output"
         lastAppliedAt = Date.now()
-        changedFrames += 1
+        visualChanged(2)
         if (ambientMode) selectAmbient(false)
         reportState()
-        if (changedFrames >= 10) { changedFrames = 0; requestFullRefresh() }
     }
 
     function queueSnapshot(contents) {
@@ -112,6 +131,7 @@ Rectangle {
         currentIndex = (currentIndex + delta + cards.length) % cards.length
         lastAction = delta < 0 ? "previous" : "next"
         lastResult = "Showing card " + (currentIndex + 1) + " of " + cards.length
+        visualChanged(1)
         showToast(lastResult)
         reportState()
     }
@@ -122,6 +142,7 @@ Rectangle {
             if (cards[index].priority === "ambient") {
                 currentIndex = index
                 lastAction = "select_ambient"; lastResult = "Ambient mode on"
+                visualChanged(1)
                 if (notify !== false) showToast(lastResult)
                 reportState(); return true
             }
@@ -137,7 +158,7 @@ Rectangle {
         if (command.action === "previous") move(-1)
         else if (command.action === "next") move(1)
         else if (command.action === "select_ambient") ok = selectAmbient(true)
-        else if (command.action === "leave_ambient") { ambientMode = false; showToast("Ambient mode off"); reportState() }
+        else if (command.action === "leave_ambient") { ambientMode = false; visualChanged(1); showToast("Ambient mode off"); reportState() }
         else if (command.action === "show_controls") showControls()
         else if (command.action === "hide_controls") hideControls()
         else if (command.action === "refresh") { endpoint.sendMessage(1, "refresh"); showToast("Refreshing") }
@@ -157,7 +178,17 @@ Rectangle {
 
     Timer { id: heartbeatTimer; interval: 5000; repeat: true; running: true; onTriggered: root.reportState() }
     Timer { id: chromeTimer; interval: 6000; repeat: false; onTriggered: root.hideControls() }
-    Timer { id: toastTimer; interval: 2000; repeat: false; onTriggered: root.toastText = "" }
+    Timer { id: toastTimer; interval: 2000; repeat: false; onTriggered: { root.toastText = ""; root.visualChanged(1) } }
+    Timer {
+        id: cleanupRefreshTimer
+        interval: 300000
+        repeat: true
+        running: true
+        onTriggered: {
+            if (root.dirtySinceFullRefresh && Date.now() - root.lastFullRefreshAt >= interval)
+                root.fullRefresh()
+        }
+    }
 
     AppLoad {
         id: endpoint
@@ -212,6 +243,7 @@ Rectangle {
             cache: false
             z: 20
             onStatusChanged: {
+                if (status === Image.Ready) root.fullRefresh()
                 if (!root.legacyCandidate) return
                 if (status === Image.Ready) endpoint.sendMessage(2, "decoded")
                 else if (status === Image.Error) endpoint.sendMessage(3, "decode failed")
@@ -371,7 +403,7 @@ Rectangle {
                 cache: false
                 smooth: false
                 onStatusChanged: {
-                    if (status === Image.Ready) root.requestFullRefresh()
+                    if (status === Image.Ready) root.fullRefresh()
                 }
             }
         }
@@ -439,7 +471,7 @@ Rectangle {
                             else if (modelData === "NEXT") root.move(1)
                             else if (modelData === "PIN" && root.currentCard.id) endpoint.sendMessage(5, root.currentCard.id)
                             else if (modelData === "DISMISS" && root.currentCard.id) endpoint.sendMessage(4, root.currentCard.id)
-                            else if (modelData === "AMBIENT") { if (root.ambientMode) { root.ambientMode = false; root.showToast("Ambient mode off"); root.reportState() } else root.selectAmbient(true) }
+                            else if (modelData === "AMBIENT") { if (root.ambientMode) { root.ambientMode = false; root.visualChanged(1); root.showToast("Ambient mode off"); root.reportState() } else root.selectAmbient(true) }
                             else if (modelData === "REFRESH") { endpoint.sendMessage(1, "refresh"); root.showToast("Refreshing") }
                             else if (modelData === "RETURN") root.returnToLauncher()
                         }

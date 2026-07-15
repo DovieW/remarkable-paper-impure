@@ -128,9 +128,13 @@ integration, use [Agent tools](agent-tools.md).
 
 ## E-ink behavior
 
-Snapshots are applied at most once every two seconds. Image decode requests a
-full refresh; message/progress changes request a periodic full refresh after
-ten changed frames. There are no animations. One-second pushes are accepted by
+Snapshots are applied at most once every two seconds. Image decode requests an
+immediate full refresh. Both Paperboard and Canvas count relay updates,
+navigation, chrome, button feedback, and other partial changes, then request a
+cleanup refresh after seven weighted changes. A five-minute timer requests a
+cleanup refresh only when the foreground app has changed since its previous
+full refresh; a static screen does not flash on a schedule. There are no
+animations. One-second pushes are accepted by
 the relay but deliberately coalesced on screen; for chat or live status,
 two-second visual updates are the practical floor and one-minute updates are
 gentle on the display.

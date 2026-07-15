@@ -18,10 +18,21 @@ Rectangle {
     property var selected: ({})
     property string statusText: "Waiting for an agent session"
     property string toastText: ""
+    property int partialChanges: 0
+    property bool dirtySinceFullRefresh: false
+    property double lastFullRefreshAt: 0
 
     function unloading() { endpoint.terminate() }
     function returnToLauncher() { endpoint.terminate() }
-    function toast(text) { toastText = text; toastTimer.restart() }
+    function fullRefresh() {
+        partialChanges = 0; dirtySinceFullRefresh = false; lastFullRefreshAt = Date.now()
+        requestFullRefresh()
+    }
+    function visualChanged(weight) {
+        partialChanges += weight || 1; dirtySinceFullRefresh = true
+        if (partialChanges >= 7) fullRefresh()
+    }
+    function toast(text) { toastText = text; toastTimer.restart(); visualChanged(1) }
     function applySnapshot(text) {
         var snapshot
         try { snapshot = JSON.parse(text) } catch (error) { statusText = "Invalid relay response"; return }
@@ -30,12 +41,13 @@ Rectangle {
         currentIndex = Math.max(0, messages.length - 1)
         selected = ({})
         statusText = session ? session.title : "No open Canvas session"
-        requestFullRefresh()
+        visualChanged(2)
     }
     function move(delta) {
         if (!messages.length) return
         currentIndex = Math.max(0, Math.min(messages.length - 1, currentIndex + delta))
         selected = ({})
+        visualChanged(1)
         toast("Message " + (currentIndex + 1) + " of " + messages.length)
     }
     function submit(action) {
@@ -50,9 +62,17 @@ Rectangle {
         if (index >= 0) copy.splice(index, 1); else copy.push(option.id)
         var next = {}; for (var key in selected) next[key] = selected[key]
         next[action.id] = copy; selected = next
+        visualChanged(1)
     }
 
-    Timer { id: toastTimer; interval: 2000; onTriggered: root.toastText = "" }
+    Timer { id: toastTimer; interval: 2000; onTriggered: { root.toastText = ""; root.visualChanged(1) } }
+    Timer {
+        interval: 300000; repeat: true; running: true
+        onTriggered: {
+            if (root.dirtySinceFullRefresh && Date.now() - root.lastFullRefreshAt >= interval)
+                root.fullRefresh()
+        }
+    }
     AppLoad {
         id: endpoint
         applicationID: "canvas"
