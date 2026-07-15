@@ -1,0 +1,80 @@
+# Paper Pure developer starter kit
+
+An agent-first toolkit for safely bringing a **reMarkable Paper Pure** from
+Developer Mode to a useful, hackable Linux tablet. It keeps the stock writing
+experience while making SSH access, backups, recovery preparation, custom
+applications, and compatibility research repeatable.
+
+> [!WARNING]
+> Developer Mode weakens the tablet's security posture and factory-resets it
+> when enabled. Do not use a modified tablet for confidential work data or
+> enterprise accounts without explicit organizational approval.
+
+## Give this repository to an AI agent
+
+Clone it in WSL or Linux, open the folder with your agent, and say:
+
+> Read `AGENTS.md` completely. Help me bring my new reMarkable Paper Pure from
+> zero to safe, key-authenticated SSH access. Stop for every physical or
+> password step, never ask me to paste the device password into chat, and do
+> not install optional software until you have identified and backed up the
+> tablet.
+
+The agent's complete operating contract is in [AGENTS.md](AGENTS.md). The
+human-facing walkthrough is [Zero-to-running quickstart](docs/agent-quickstart.md).
+
+## What is included
+
+- `scripts/bootstrap-ssh.sh` — establishes a dedicated, host-key-pinned USB
+  connection and optionally enables trusted-LAN Wi-Fi SSH.
+- `scripts/status.sh` — read-only device, service, storage, and custom-stack
+  inventory.
+- `scripts/backup.sh` — read-only document and state backup with checksums.
+- `docs/security.md` — the security boundary and required practices.
+- `docs/recovery.md` — official recovery preparation and destructive-action
+  warnings.
+- `docs/custom-software.md` — a tested Vellum, Xovi, AppLoad, and KOReader
+  example for one exact OS version.
+- `docs/resources.md` — official and community starting points.
+
+## Tested baseline
+
+The repository was initially validated on:
+
+| Property | Value |
+| --- | --- |
+| Device | reMarkable Paper Pure |
+| Platform | `imx93-tatsu` |
+| Architecture | `aarch64` |
+| reMarkable OS image | `3.27.3.0` |
+| Host environment | WSL2 |
+
+This is a compatibility record, not permission to assume every Paper Pure is
+still on that version. Agents must inspect the connected device before writes.
+
+## Safe order of operations
+
+1. Read the official Developer Mode warning and sync important documents.
+2. Enable Developer Mode, complete the reset, unlock the tablet, and enable
+   its USB web interface.
+3. Establish key-authenticated USB SSH with `scripts/bootstrap-ssh.sh`.
+4. Run `scripts/status.sh --host remarkable-usb` and record the exact platform.
+5. Run and verify `scripts/backup.sh --host remarkable-usb`.
+6. Prepare a recovery route appropriate to the host computer.
+7. Only then evaluate launchers, readers, dashboards, or other applications.
+
+## Project rules
+
+- Prefer official documentation, reviewed source, pinned releases, and hashes.
+- Never commit passwords, private keys, device identifiers, LAN addresses,
+  account tokens, user documents, or backup data.
+- Never assume software for reMarkable 1/2, Paper Pro, or Paper Pro Move works
+  on Paper Pure.
+- Every device-changing procedure needs verification and rollback instructions.
+- Do not use unreviewed `curl | sh` or similar root installers.
+
+See [Security](docs/security.md) before changing a device.
+
+## License
+
+The repository is available under the [MIT License](LICENSE).
