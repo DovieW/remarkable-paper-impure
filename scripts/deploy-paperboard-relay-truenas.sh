@@ -46,16 +46,28 @@ done
 [[ -n $host ]] || die "--host is required (or set PAPERBOARD_TRUENAS_HOST in an ignored shell environment)"
 [[ $host != -* && $host != *$'\n'* ]] || die "invalid SSH host"
 [[ $dataset =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)+$ ]] || die "invalid dataset"
-for command in docker gzip jq ssh; do command -v "$command" >/dev/null || die "missing prerequisite: $command"; done
+for command in docker gzip jq sha256sum ssh; do command -v "$command" >/dev/null || die "missing prerequisite: $command"; done
 
-release="$(git -C "$ROOT" rev-parse --short=12 HEAD)"
-image="paperboard-relay:$release"
+content_hash() {
+  (
+    cd "$ROOT"
+    git ls-files -co --exclude-standard -- "$@" | LC_ALL=C sort | while IFS= read -r file; do
+      printf '%s\0' "$file"
+      sha256sum "$file"
+    done
+  ) | sha256sum | cut -c1-12
+}
+
+relay_release="$(content_hash apps/relay packages/core package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json scripts/paperboard-tablet-bridge.sh)"
+remote_release="$(content_hash apps/remote package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json scripts/paperctl.sh scripts/tablet-companion.sh)"
+image="paperboard-relay:$relay_release"
+remote_image="paperboard-remote:$remote_release"
 mountpoint="/mnt/$dataset"
 template="$ROOT/deploy/relay/compose.truenas-app.yml"
 [[ -f $template ]] || die "TrueNAS Compose template is missing"
 
 if $dry_run; then
-  printf 'Would build and transfer %s directly to %s without a registry.\n' "$image" "$host"
+  printf 'Would build and transfer %s and %s directly to %s without a registry.\n' "$image" "$remote_image" "$host"
   printf 'Would install/update %s using prepared dataset %s.\n' "$app_name" "$mountpoint"
   printf 'Would expose device API on private Tailscale HTTPS port 8787; admin stays on loopback.\n'
   printf 'Dry run complete: no image, app, or Tailscale state was changed.\n'
@@ -67,18 +79,22 @@ version="$(ssh "${ssh_options[@]}" "$host" 'midclt call system.info | jq -r .ver
 [[ $version == 25.* ]] || die "unsupported TrueNAS release: $version"
 ssh "${ssh_options[@]}" "$host" "
   /usr/bin/sudo -n docker inspect ix-tailscale-tailscale-1 >/dev/null
-  /usr/bin/sudo -n test -d '$mountpoint/data' -a -d '$mountpoint/ssh' -a -d '$mountpoint/secrets' -a -d '$mountpoint/config'
+  /usr/bin/sudo -n test -d '$mountpoint/data' -a -d '$mountpoint/ssh' -a -d '$mountpoint/secrets' -a -d '$mountpoint/config' -a -d '$mountpoint/remote-control'
   /usr/bin/sudo -n test -f '$mountpoint/secrets/master_key' -a -f '$mountpoint/secrets/admin_token'
   /usr/bin/sudo -n test -f '$mountpoint/secrets/tablet_ssh_key' -a -f '$mountpoint/config/tablet-bridge.conf'
 " || die "TrueNAS dataset is not prepared; follow docs/relay.md"
 
-printf 'Building the pinned relay image.\n'
+printf 'Building content-addressed Relay and Remote images.\n'
 docker build -q -f "$ROOT/apps/relay/Dockerfile" -t "$image" "$ROOT" >/dev/null
-printf 'Transferring the image directly to TrueNAS (no Docker Hub).\n'
-docker save "$image" | gzip -1 | ssh "${ssh_options[@]}" "$host" 'gzip -dc | /usr/bin/sudo -n docker load >/dev/null'
+docker build -q -f "$ROOT/apps/remote/Dockerfile" -t "$remote_image" "$ROOT" >/dev/null
+printf 'Transferring images directly to TrueNAS (no Docker Hub).\n'
+for transfer_image in "$image" "$remote_image"; do
+  docker save "$transfer_image" | gzip -1 | ssh "${ssh_options[@]}" "$host" 'gzip -dc | /usr/bin/sudo -n docker load >/dev/null'
+done
 
 temporary="$(mktemp -d)"
-sed -e "s|__PAPERBOARD_IMAGE__|$image|g" -e "s|__PAPERBOARD_DATASET__|$mountpoint|g" \
+sed -e "s|__PAPERBOARD_IMAGE__|$image|g" -e "s|__PAPERBOARD_REMOTE_IMAGE__|$remote_image|g" \
+  -e "s|__PAPERBOARD_DATASET__|$mountpoint|g" \
   "$template" > "$temporary/compose.yml"
 scp "${ssh_options[@]}" "$temporary/compose.yml" "$host:paperboard-relay-compose.yml" >/dev/null
 
@@ -92,7 +108,7 @@ dns=$(/usr/bin/sudo -n docker exec ix-tailscale-tailscale-1 tailscale status --j
 test -n "$dns"
 printf 'PAPERBOARD_PUBLIC_BASE_URL=https://%s:8787\n' "$dns" | /usr/bin/sudo -n tee "$mountpoint/config/relay.env" >/dev/null
 /usr/bin/sudo -n chmod 0600 "$mountpoint/config/relay.env"
-if midclt call app.query "[[\"id\",\"=\",\"$app_name\"]]" | jq -e 'length > 0' >/dev/null; then
+if midclt call app.query "[[\"name\",\"=\",\"$app_name\"]]" | jq -e 'length > 0' >/dev/null; then
   payload=$(/usr/bin/sudo -n cat "$mountpoint/config/compose.yml" | jq -Rs '{custom_compose_config_string:.}')
   midclt call -j app.update "$app_name" "$payload" >/dev/null
 else
@@ -104,9 +120,16 @@ for attempt in $(seq 1 60); do
   sleep 1
 done
 curl -fsS http://127.0.0.1:8787/healthz >/dev/null
+for attempt in $(seq 1 60); do
+  curl -fsS http://127.0.0.1:4174/remote/api/session >/dev/null 2>&1 && break
+  sleep 1
+done
+curl -fsS http://127.0.0.1:4174/remote/api/session >/dev/null
 /usr/bin/sudo -n docker exec ix-tailscale-tailscale-1 tailscale serve --bg --https=8787 http://127.0.0.1:8787 >/dev/null
+/usr/bin/sudo -n docker exec ix-tailscale-tailscale-1 tailscale serve --bg --https=8787 --set-path=/remote http://127.0.0.1:4174 >/dev/null
 REMOTE
 
 private_url="$(ssh "${ssh_options[@]}" "$host" "/usr/bin/sudo -n awk -F= '/^PAPERBOARD_PUBLIC_BASE_URL=/{print \$2}' '$mountpoint/config/relay.env'")"
 curl -fsS "$private_url/healthz" >/dev/null || die "private Tailscale endpoint is not healthy"
-printf 'TrueNAS Paperboard relay is healthy over private Tailscale HTTPS.\n'
+curl -fsS "$private_url/remote/api/session" >/dev/null || die "private Paper Pure Remote endpoint is not healthy"
+printf 'TrueNAS Paperboard Relay and Remote are healthy over private Tailscale HTTPS.\n'

@@ -70,14 +70,26 @@ See [docs/agent-tools.md](docs/agent-tools.md) for CLI and MCP use, and
 ## Relay and remote
 
 The relay supports native Paperboard clients, TRMNL Hosted BYOD, and self-hosted
-Terminus. It is designed for a private tailnet and keeps its admin listener on
-host loopback. [docs/relay.md](docs/relay.md) covers deployment.
+Terminus. The preferred TrueNAS custom app includes both Relay and Paper Pure
+Remote, reuses the NAS Tailscale app, and keeps every admin listener on host
+loopback. [docs/relay.md](docs/relay.md) covers deployment and lifecycle.
 
 Paper Pure Remote provides an ephemeral browser mirror with bounded tap/swipe
 input. It never automates unlock, accepts text, or exposes arbitrary shell.
 The TrueNAS deployment serves it under `/remote/` only to devices permitted by
 the tailnet ACL; an on-disk kill switch still disables input immediately. See
 [docs/remote.md](docs/remote.md).
+
+The lifecycle entrypoint is intentionally explicit about the NAS SSH target:
+
+```bash
+scripts/manage-paperboard-truenas.sh status --host USER@NAS
+scripts/manage-paperboard-truenas.sh snapshot --host USER@NAS
+scripts/manage-paperboard-truenas.sh deploy --host USER@NAS
+```
+
+Owner-specific aliases and paths belong in ignored configuration, never in
+tracked examples.
 
 ## Development and release checks
 

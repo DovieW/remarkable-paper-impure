@@ -19,11 +19,11 @@ poll API authenticated by a device token, and an admin API on host loopback.
 
 There are two supported layouts:
 
-- `scripts/deploy-paperboard-relay-truenas.sh` installs the relay as a TrueNAS
-  custom app and reuses an existing TrueNAS Tailscale app. This is preferred
-  when the NAS is already on the tailnet. It builds on the operator host and
-  streams the image directly to TrueNAS; it does not require Docker Hub or
-  another registry.
+- `scripts/manage-paperboard-truenas.sh` manages Relay and Paper Pure Remote as
+  one TrueNAS custom app and reuses an existing TrueNAS Tailscale app. This is
+  preferred when the NAS is already on the tailnet. It builds on the operator
+  host and streams the image directly to TrueNAS; it does not require Docker
+  Hub or another registry.
 - `deploy/relay/compose.truenas.yml` is the standalone reference stack with a
   dedicated Tailscale container, relay, and Paper Pure Remote.
 
@@ -53,6 +53,8 @@ secrets/                      root:root, mode 0711
 secrets/master_key            root:root, mode 0400
 secrets/admin_token           root:root, mode 0400
 secrets/tablet_ssh_key        UID 100:GID 101, mode 0400
+remote-control/               UID 100:GID 101, mode 0700
+remote-control/remote.disabled UID 100:GID 101, mode 0600 (safe default)
 ```
 
 The mixed secret ownership is intentional. The entrypoint reads the master
@@ -65,17 +67,43 @@ Copy values only from ignored local files, without printing them. Seed
 compare checksums locally, and immediately restart the old relay until the
 tablet cutover is complete.
 
-Deploy or update:
+The lifecycle manager is the normal entrypoint. Start with dry runs:
 
 ```bash
-scripts/deploy-paperboard-relay-truenas.sh --host USER@NAS --dry-run
-scripts/deploy-paperboard-relay-truenas.sh --host USER@NAS
+scripts/manage-paperboard-truenas.sh prepare --host USER@NAS --dry-run
+scripts/manage-paperboard-truenas.sh prepare --host USER@NAS
+scripts/manage-paperboard-truenas.sh deploy --host USER@NAS --dry-run
+scripts/manage-paperboard-truenas.sh deploy --host USER@NAS
+scripts/manage-paperboard-truenas.sh snapshot-policy --host USER@NAS
+scripts/manage-paperboard-truenas.sh status --host USER@NAS
 ```
 
-The generated custom-app Compose binds both relay ports to NAS loopback.
-Tailscale Serve publishes only the device/client API on private HTTPS port
-8787. Port 8788 remains loopback-only, and Funnel must remain disabled. The
-script verifies both loopback and tailnet health before succeeding.
+The generated custom-app Compose binds Relay, Remote, and admin ports to NAS
+loopback. Tailscale Serve publishes the device/client API at private HTTPS port
+8787 and Remote below `/remote/` on that same private endpoint. Port 8788
+remains loopback-only, and Funnel must remain disabled. The deployment verifies
+loopback and tailnet health before succeeding.
+
+Input begins disarmed. Arm it only for an attended session, then disarm it:
+
+```bash
+scripts/manage-paperboard-truenas.sh remote-arm --host USER@NAS --confirm
+scripts/manage-paperboard-truenas.sh remote-disarm --host USER@NAS
+```
+
+Operational commands are idempotent where possible:
+
+```bash
+scripts/manage-paperboard-truenas.sh snapshot --host USER@NAS
+scripts/manage-paperboard-truenas.sh disable --host USER@NAS
+scripts/manage-paperboard-truenas.sh enable --host USER@NAS
+scripts/manage-paperboard-truenas.sh rollback --host USER@NAS \
+  --snapshot SNAPSHOT_NAME --confirm
+scripts/manage-paperboard-truenas.sh uninstall --host USER@NAS --confirm
+```
+
+Rollback and uninstall require an explicit confirmation. Uninstall takes a
+snapshot and retains the dataset. No lifecycle command destroys the dataset.
 
 After updating the tablet's ignored relay configuration, verify its heartbeat
 and acknowledgement cursor before stopping the old relay. Retain the old
@@ -119,8 +147,9 @@ storing bearer tokens.
 ## Backups
 
 Use filesystem/ZFS snapshots of the persistent dataset. Do not add a second
-application-specific backup format. Snapshot before upgrading, retain according
-to the NAS policy, and test restoration into a separate path/container.
+application-specific backup format. `snapshot-policy` schedules a daily 03:15
+snapshot with 14-day retention, while `snapshot` creates a named pre-change
+snapshot. Test restoration into a separate path/container before relying on it.
 
 ## Health
 

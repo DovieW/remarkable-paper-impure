@@ -8,15 +8,15 @@ COPY apps/remote apps/remote
 RUN pnpm --filter @paperboard/remote build && pnpm deploy --filter @paperboard/remote --prod /output
 
 FROM node:24.15.0-alpine
-RUN apk add --no-cache bash openssh-client tini \
+RUN apk add --no-cache bash openssh-client tini su-exec \
     && addgroup -S paperboard && adduser -S -G paperboard -h /app paperboard
 WORKDIR /app
 COPY --from=build --chown=paperboard:paperboard /output ./
 COPY --chown=paperboard:paperboard apps/remote/public ./public
 COPY scripts/paperctl.sh scripts/tablet-companion.sh /opt/paperboard/scripts/
-RUN chmod 755 /opt/paperboard/scripts/*.sh
+COPY apps/remote/container-entrypoint.sh /usr/local/bin/paperboard-remote-entrypoint
+RUN chmod 755 /opt/paperboard/scripts/*.sh /usr/local/bin/paperboard-remote-entrypoint
 ENV NODE_ENV=production PAPER_REMOTE_BIND=0.0.0.0 PAPER_REMOTE_PORT=4174 PAPERBOARD_REPOSITORY_ROOT=/opt/paperboard
-USER paperboard
 EXPOSE 4174
-ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["node", "dist/main.js"]
+ENTRYPOINT ["/usr/local/bin/paperboard-remote-entrypoint"]
+CMD ["/sbin/tini", "--", "node", "dist/main.js"]

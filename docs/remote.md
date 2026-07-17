@@ -26,8 +26,11 @@ full visible e-ink update normally appears within 1–2 seconds; the selectable
 
 ## TrueNAS/tailnet deployment
 
-`deploy/relay/compose.truenas.yml` runs Remote in the same private Tailscale
-network namespace as the relay. Tailscale Serve publishes it at:
+The preferred custom-app deployment in
+`deploy/relay/compose.truenas-app.yml` runs Remote beside Relay, binds both to
+NAS loopback, and reuses the existing NAS Tailscale app. The standalone
+`deploy/relay/compose.truenas.yml` remains available when a dedicated Tailscale
+container is required. Both publish Remote at:
 
 ```text
 https://PRIVATE-TAILNET-NAME/remote/
@@ -45,14 +48,15 @@ PAPER_REMOTE_INPUT_ENABLED=true
 PAPERBOARD_REMOTE_CONTROL_DIR=/mnt/POOL/paperboard/remote-control
 ```
 
-Create `remote.disabled` inside that control directory to disable tap/swipe
-immediately without rebuilding:
+The lifecycle manager creates `remote.disabled` by default. For an attended
+session, use the reviewed controls rather than editing the dataset manually:
 
 ```bash
-touch /mnt/POOL/paperboard/remote-control/remote.disabled
+scripts/manage-paperboard-truenas.sh remote-arm --host USER@NAS --confirm
+scripts/manage-paperboard-truenas.sh remote-disarm --host USER@NAS
 ```
 
-Remove it to restore input. The app also rate-limits input to eight requests
+The app also rate-limits input to eight requests
 per second, validates coordinates/duration, and limits request bodies.
 
 ## Wi-Fi changes

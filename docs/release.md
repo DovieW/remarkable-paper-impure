@@ -7,9 +7,10 @@ physical device and depends on an exact firmware compatibility record.
 scripts/release-check.sh
 ```
 
-The gate performs shell syntax validation, SSH bootstrap dry-run, TypeScript
-build/type checks, all tests, QML bundle build, operation-registry validation,
-diff whitespace checks, and non-printing tracked/history secret-pattern scans.
+The gate performs shell syntax validation, SSH bootstrap and TrueNAS lifecycle
+dry-runs, TypeScript build/type checks, all tests, QML bundle build,
+operation-registry and custom-app Compose validation, diff whitespace checks,
+and non-printing tracked/history secret and private-tailnet scans.
 
 Then, with USB preferred:
 
