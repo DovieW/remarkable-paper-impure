@@ -18,6 +18,6 @@ for _ in $(seq 1 40); do
   sleep 0.5
 done
 curl -fsS http://127.0.0.1:8787/healthz >/dev/null || die "relay did not become healthy"
-powershell.exe -NoProfile -NonInteractive -Command 'tailscale serve --bg http://127.0.0.1:8787' | tr -d '\r'
+powershell.exe -NoProfile -NonInteractive -Command 'tailscale serve --bg http://127.0.0.1:8787' >/dev/null
 docker compose --env-file "$env_file" -f "$compose" ps
 printf 'Public API: private Windows Tailscale HTTPS\nLocal API: http://127.0.0.1:8787\nLocal-only administration: http://127.0.0.1:8788\n'

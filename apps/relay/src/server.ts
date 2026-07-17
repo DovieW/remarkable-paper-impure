@@ -197,7 +197,11 @@ export function buildServer(config: RelayConfig): RelayServer {
 
   app.get("/v1/devices/:device/tablet/screenshot", async (request, reply) => {
     if (!client(request, "screen:read")) return deny(reply);
-    try { const { device } = deviceParamSchema.parse(request.params); return reply.type("image/png").header("cache-control", "no-store").send(await tablet.screenshot(device)); }
+    try {
+      const { device } = deviceParamSchema.parse(request.params);
+      const screenshot = await tablet.screenshot(device);
+      return reply.type("image/png").header("cache-control", "no-store").send(screenshot);
+    }
     catch (error) { return bad(reply, error); }
   });
 
@@ -269,17 +273,19 @@ export function buildServer(config: RelayConfig): RelayServer {
   app.get("/v1/device/:device/canvas/poll", async (request, reply) => {
     const { device } = deviceParamSchema.parse(request.params); if (!requireDevice(request, store, device)) return deny(reply);
     const query = devicePollQuerySchema.parse(request.query);
-    let session = store.latestOpenCanvasSession(device);
-    if ((!session || session.cursor <= query.cursor) && query.wait > 0) {
+    let cursor = store.canvasCursor(device);
+    if (cursor <= query.cursor && query.wait > 0) {
       await new Promise<void>((resolve) => {
         const timer = setTimeout(done, query.wait * 1000); const changed = (): void => done();
         function done(): void { clearTimeout(timer); changes.off(device, changed); resolve(); }
         changes.once(device, changed);
       });
-      session = store.latestOpenCanvasSession(device);
+      cursor = store.canvasCursor(device);
     }
+    const session = store.latestOpenCanvasSession(device);
+    const messages = store.canvasHistory(device, config.publicBaseUrl);
     store.heartbeat(device);
-    return { cursor: session?.cursor ?? 0, session: session ? { ...session, messages: store.canvasMessages(device, session.id, config.publicBaseUrl) } : null, server_time: new Date().toISOString() };
+    return { cursor, session: session ? { ...session, messages } : null, messages, server_time: new Date().toISOString() };
   });
 
   app.put("/v1/device/:device/ui-state", async (request, reply) => {

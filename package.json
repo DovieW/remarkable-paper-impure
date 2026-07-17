@@ -11,7 +11,11 @@
     "test": "pnpm -r test",
     "dev:relay": "pnpm --filter @paperboard/relay dev",
     "paperboard": "pnpm --filter @paperboard/cli start --",
+    "remote": "pnpm --filter @paperboard/remote start",
     "mcp": "pnpm --filter @paperboard/mcp start",
     "home-assistant": "pnpm --filter @paperboard/home-assistant start"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1"
   }
 }

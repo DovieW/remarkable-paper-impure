@@ -19,6 +19,7 @@ if $dry_run; then
   exit 0
 fi
 ssh -- "$host" "set -eu
-  install -m 0755 '/home/root/.local/share/paperboard/backups/$backup' /home/root/xovi/extensions.d/appload.so
+  cp '/home/root/.local/share/paperboard/backups/$backup' /home/root/xovi/extensions.d/appload.so
+  chmod 0755 /home/root/xovi/extensions.d/appload.so
   systemctl restart xochitl"
 echo "Restored upstream AppLoad. The tablet must be unlocked after the restart."

@@ -52,3 +52,26 @@ test("lists the agent tools and maps progress input to a replaceable card", asyn
   assert.equal((calls[0]?.[1] as { progress: number }).progress, 42);
   assert.match(String(calls[0]?.[2]), /^[0-9a-f-]{36}$/);
 });
+
+test("uses the configured default device when a tool call omits it", async (context) => {
+  let selectedDevice = "";
+  const relay = {
+    uploadAsset: async () => ({}), show: async () => ({}), update: async () => ({}),
+    list: async (device: string) => { selectedDevice = device; return { cards: [] }; },
+    get: async () => ({}), delete: async () => undefined, clear: async () => ({}), status: async () => ({}),
+    command: async () => ({}), commandStatus: async () => ({}), tabletStatus: async () => ({}), tabletApps: async () => ({}),
+    tabletLaunch: async () => ({}), tabletReturn: async () => ({}), tabletScreenshot: async () => Buffer.alloc(0),
+    createCanvasSession: async () => ({}), listCanvasSessions: async () => ({}), getCanvasSession: async () => ({}),
+    sendCanvasMessage: async () => ({}), canvasEvents: async () => ({}), acknowledgeCanvasEvent: async () => undefined,
+    closeCanvasSession: async () => ({}),
+  } as PaperboardToolClient;
+  const server = createPaperboardMcpServer(relay, { defaultDevice: "paper-pure" });
+  const client = new Client({ name: "paperboard-default-device-test", version: "1.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  context.after(async () => { await client.close(); await server.close(); });
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+  const response = await client.callTool({ name: "paperboard_list", arguments: {} });
+  assert.equal(response.isError, undefined);
+  assert.equal(selectedDevice, "paper-pure");
+});

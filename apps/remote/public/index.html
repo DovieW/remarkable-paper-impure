@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Paper Pure Remote</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <main class="workbench">
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">LOCAL / SSH-ONLY</p>
+        <h1>Paper Pure <i>Remote</i></h1>
+      </div>
+      <div class="connection"><span class="signal" id="signal"></span><span id="connectionText">Connecting</span></div>
+    </header>
+
+    <section class="stage" aria-label="Interactive tablet display">
+      <div class="display-shell">
+        <canvas id="display" width="1404" height="1872" aria-label="Current reMarkable display"></canvas>
+        <div class="frame-state" id="frameState">Waiting for first frame</div>
+        <div class="touch-mark" id="touchMark"></div>
+      </div>
+      <aside class="rail">
+        <div class="rail-block safety">
+          <p class="label">INPUT</p>
+          <button id="armButton" class="arm" type="button"><span>○</span> Disarmed</button>
+          <p id="armHint">Unlock the tablet physically before arming.</p>
+        </div>
+        <div class="rail-block">
+          <p class="label">VIEW</p>
+          <button id="rotateButton" type="button">Rotate 90°</button>
+          <button id="refreshButton" type="button">Refresh now</button>
+          <label class="select-label" for="interval">Cadence</label>
+          <select id="interval">
+            <option value="1500">Fast</option>
+            <option value="3000" selected>Balanced</option>
+            <option value="5000">Quiet</option>
+          </select>
+        </div>
+        <div class="rail-block">
+          <p class="label">APPS</p>
+          <button data-control="paperboard" type="button">Paperboard</button>
+          <button data-control="canvas" type="button">Canvas</button>
+          <button data-control="exit" class="exit" type="button">Exit custom app</button>
+        </div>
+      </aside>
+    </section>
+
+    <footer class="statusbar">
+      <span id="statusText">Initializing local session…</span>
+      <span><b id="frameAge">—</b> last frame</span>
+      <span>Click = tap · drag = swipe</span>
+    </footer>
+  </main>
+  <dialog id="armDialog">
+    <form method="dialog">
+      <p class="eyebrow">AUTHENTICATION BOUNDARY</p>
+      <h2>Is the tablet already unlocked?</h2>
+      <p>The remote never enters or stores a passcode. Input will automatically disarm in five minutes.</p>
+      <div class="dialog-actions">
+        <button value="cancel">Cancel</button>
+        <button value="confirm" class="confirm">Yes, arm input</button>
+      </div>
+    </form>
+  </dialog>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

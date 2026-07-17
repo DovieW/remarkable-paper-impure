@@ -1,0 +1,70 @@
+diff --git a/resources/qml/appload.qml b/resources/qml/appload.qml
+index 6dcc307..177ef81 100644
+--- a/resources/qml/appload.qml
++++ b/resources/qml/appload.qml
+@@ -31,7 +31,28 @@ Item {
+         }
+     }
+
++    function snapshotApplication(modelData) {
++        if(modelData === undefined || modelData === null) return null;
++        return {
++            id: modelData.id,
++            name: modelData.name,
++            supportsScaling: modelData.supportsScaling,
++            canHaveMultipleFrontends: modelData.canHaveMultipleFrontends,
++            virtualKeyboardLayout: modelData.virtualKeyboardLayout,
++            disablesWindowedMode: modelData.disablesWindowedMode,
++            externalType: modelData.externalType,
++            aspectRatio: modelData.aspectRatio
++        };
++    }
++
+     function launchWindow(modelData, extraArgs, extraEnv) {
++        // Creating the QML window can invalidate a GridView delegate's live
++        // modelData wrapper. Copy every value used below before createObject().
++        modelData = snapshotApplication(modelData);
++        if(modelData === null || typeof modelData.id !== "string" || typeof modelData.name !== "string") {
++            console.log("Cannot launch an application without model data.");
++            return null;
++        }
+         let qtfbKey = -1;
+         let win;
+
+@@ -100,8 +121,8 @@ Item {
+             for(let i of library.applications) {
+                 if(i.id === id) {
+                     console.log("Launching: " + id);
+-                    const window = launchWindow(i, args, env);
+-                    if(i.disablesWindowedMode || !windowed) window.maximize();
++                    const application = snapshotApplication(i), window = launchWindow(application, args, env);
++                    if(window && (application.disablesWindowedMode || !windowed)) window.maximize();
+                     return;
+                 }
+             }
+@@ -215,6 +236,8 @@ Item {
+
+             delegate: Rectangle {
+                 required property var modelData
++                property var launchData: null
++                Component.onCompleted: launchData = snapshotApplication(modelData)
+                 anchors.margins: 10
+                 width: gridView.cellWidth - 20
+                 height: gridView.cellHeight - 20
+@@ -245,11 +268,13 @@ Item {
+                 MouseArea {
+                     anchors.fill: parent
+                     onClicked: () => {
+-                        launchWindow(modelData).maximize();
++                        const window = launchWindow(launchData);
++                        if(window) window.maximize();
+                     }
+                     onPressAndHold: () => {
+-                        const window = launchWindow(modelData);
+-                        if(modelData.disablesWindowedMode) {
++                        const application = launchData;
++                        const window = launchWindow(application);
++                        if(window && application.disablesWindowedMode) {
+                             window.maximize();
+                         }
+                     }

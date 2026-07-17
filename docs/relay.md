@@ -14,6 +14,12 @@ the relay process but uses a forced-command SSH key that rejects arbitrary
 shell commands, paths, taps, and passcodes. Screenshot output is streamed from
 the tablet and never written by the relay.
 
+For the Windows/WSL deployment, that key is mounted as a Docker secret. The
+container entrypoint copies it into tmpfs with mode 0600 before dropping
+privileges. The mounted SSH configuration pins the host key learned over
+physical USB; the bridge accepts only status, installed-app enumeration,
+explicit AppLoad launch/return, and one ephemeral screenshot operation.
+
 Do not start the TrueNAS deployment with a new Tailscale identity while the old
 relay is still active under the same hostname.
 
@@ -64,6 +70,14 @@ from the tailnet listener.
 ```bash
 scripts/provision-paperboard-device.sh \
   --device paper-pure --client local-agent
+```
+
+To add another least-privilege agent without rotating or reprovisioning the
+tablet identity:
+
+```bash
+scripts/provision-paperboard-client.sh \
+  --client example-agent --device paper-pure
 ```
 
 Device and agent tokens are different. Tokens are shown only once to the

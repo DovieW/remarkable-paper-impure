@@ -40,6 +40,7 @@ human-facing walkthrough is [Zero-to-running quickstart](docs/agent-quickstart.m
   and verify work themselves while preserving authentication boundaries.
 - `docs/paperboard.md` — the private output queue and Paper Pure application.
 - `docs/canvas.md` — the manually opened interactive touch UI for agent sessions.
+- `docs/remote.md` — a local SSH-only browser mirror with click and swipe input.
 - `docs/home-assistant.md` — the risk-tiered, allowlisted Paperboard Canvas adapter.
 - `docs/relay.md` — hardened relay deployment for WSL/Windows or Linux.
 - `docs/agent-tools.md` — generic CLI and MCP tools for any AI agent.
@@ -100,6 +101,15 @@ ignored `secrets/` and `deploy/*/.env` files.
 agent prompts and structured touch responses. This separation keeps Paperboard
 quiet and ambient while allowing agents to offer choices, confirmations, and
 checklists when a person explicitly opens Canvas.
+
+For supervised development, [Paper Pure Remote](docs/remote.md) mirrors the
+physical display into a local browser and maps clicks and drags to bounded
+tablet gestures. It binds only to `127.0.0.1`, begins with input disarmed, and
+never handles the tablet passcode:
+
+```bash
+scripts/start-paper-remote.sh
+```
 
 ## Project rules
 

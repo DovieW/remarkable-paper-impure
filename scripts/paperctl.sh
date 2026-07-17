@@ -37,21 +37,27 @@ case "$command_name" in
     (($# <= 1)) || die "screenshot accepts at most one output path"
     output="${1:-$REPOSITORY_ROOT/captures/paperctl-$(date -u +%Y%m%dT%H%M%SZ).png}"
     remote_file="/home/root/.local/share/paperctl/current.png"
-    ssh -o BatchMode=yes "$host" sh -s -- "$remote_file" <<'REMOTE'
+    mkdir -p "$(dirname "$output")"
+    local_file="$output.partial.$$"
+    trap 'rm -f "$local_file"' EXIT INT TERM
+    ssh -o BatchMode=yes "$host" sh -s -- "$remote_file" >"$local_file" <<'REMOTE'
 set -eu
 output=$1
 mkdir -p "$(dirname "$output")"
 rm -f "$output"
+trap 'rm -f "$output"' EXIT INT TERM
 echo ">etakeScreenshot:$output,0" > /run/xovi-mb
 test "$(cat /run/xovi-mb-out)" = success
-for attempt in 1 2 3 4 5; do
-  test -s "$output" && exit 0
-  sleep 1
+attempt=0
+while test ! -s "$output"; do
+  attempt=$((attempt + 1))
+  test "$attempt" -lt 100 || exit 1
+  sleep 0.05
 done
-exit 1
+cat "$output"
 REMOTE
-    mkdir -p "$(dirname "$output")"
-    scp -q "$host:$remote_file" "$output"
+    mv "$local_file" "$output"
+    trap - EXIT INT TERM
     printf '%s\n' "$output"
     ;;
   tap)

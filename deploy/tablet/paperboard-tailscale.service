@@ -1,0 +1,18 @@
+[Unit]
+Description=Paperboard userspace Tailscale connection
+After=network.target
+
+[Service]
+Type=simple
+ExecStartPre=/bin/mkdir -p /home/root/.local/share/paperboard/tailscale/runtime
+ExecStart=/home/root/.local/share/paperboard/tailscale/current/tailscaled --state=/home/root/.local/share/paperboard/tailscale/state.json --socket=/home/root/.local/share/paperboard/tailscale/runtime/tailscaled.sock --tun=userspace-networking --socks5-server=127.0.0.1:1055
+ExecStartPost=/bin/sh -c 'attempt=0; while ! test -S /home/root/.local/share/paperboard/tailscale/runtime/tailscaled.sock; do attempt=$((attempt + 1)); test "$attempt" -lt 40 || exit 1; sleep 1; done'
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=20
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

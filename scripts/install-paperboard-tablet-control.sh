@@ -29,17 +29,22 @@ done
 [[ -f $public_key_file ]] || { echo "--public-key FILE is required" >&2; exit 2; }
 key=$(<"$public_key_file")
 [[ $key == ssh-ed25519\ * ]] || { echo "only an Ed25519 public key is accepted" >&2; exit 1; }
-key_b64=$(printf '%s' "$key" | base64 -w0)
 ssh -o BatchMode=yes "$host" 'test "$(hostname)" = imx93-tatsu && test "$(uname -m)" = aarch64 && test -d /home/root/xovi/exthome/appload'
 $dry_run && { echo "Paperboard tablet-control install dry run passed."; exit 0; }
 
 remote_script=$(mktemp)
 trap 'rm -f "$remote_script"' EXIT
 sed -n '/^__REMOTE__$/,$p' "$0" | sed '1d' >"$remote_script"
+remote_key="/home/root/.local/share/paperboard-control/authorized-key.install.$$.$RANDOM"
+ssh -o BatchMode=yes "$host" 'mkdir -p /home/root/.local/share/paperboard-control && chmod 0700 /home/root/.local/share/paperboard-control'
 scp -q "$remote_script" "$host:/home/root/.local/bin/paperboard-control"
-ssh -o BatchMode=yes "$host" sh -s -- "$key_b64" <<'REMOTE'
+scp -q "$public_key_file" "$host:$remote_key"
+ssh -o BatchMode=yes "$host" sh -s -- "$remote_key" <<'REMOTE'
 set -eu
-key=$(printf '%s' "$1" | base64 -d)
+key_file=$1
+trap 'rm -f "$key_file"' EXIT INT TERM
+key=$(cat "$key_file")
+case "$key" in ssh-ed25519\ *) ;; *) echo "invalid staged public key" >&2; exit 1;; esac
 chmod 0700 /home/root/.local/bin/paperboard-control
 mkdir -p /home/root/.ssh /home/root/.local/share/paperboard-control
 chmod 0700 /home/root/.ssh

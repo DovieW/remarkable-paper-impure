@@ -5,21 +5,24 @@ set -Eeuo pipefail
 readonly PROGRAM_NAME="${0##*/}"
 host="${REMARKABLE_HOST:-remarkable-usb}"
 hostname="paperboard"
+serve_ssh=false
 
 die() { printf '%s: %s\n' "$PROGRAM_NAME" "$*" >&2; exit 1; }
 while (($#)); do
   case "$1" in
     --host) (($# >= 2)) || die "--host requires a value"; host=$2; shift 2 ;;
     --hostname) (($# >= 2)) || die "--hostname requires a value"; hostname=$2; shift 2 ;;
-    -h|--help) printf 'Usage: %s [--host HOST] [--hostname NAME]\n' "$PROGRAM_NAME"; exit 0 ;;
+    --serve-ssh) serve_ssh=true; shift ;;
+    -h|--help) printf 'Usage: %s [--host HOST] [--hostname NAME] [--serve-ssh]\n' "$PROGRAM_NAME"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
 [[ "$hostname" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]] || die "hostname is invalid"
 
-ssh -t "$host" sh -s -- "$hostname" <<'REMOTE'
+ssh -t "$host" sh -s -- "$hostname" "$serve_ssh" <<'REMOTE'
 set -eu
 hostname=$1
+serve_ssh=$2
 base=/home/root/.local/share/paperboard/tailscale
 binary="$base/current/tailscale"
 daemon="$base/current/tailscaled"
@@ -27,6 +30,13 @@ runtime="$base/runtime"
 socket="$runtime/tailscaled.sock"
 pidfile="$runtime/tailscaled.pid"
 test -x "$binary" -a -x "$daemon" || { echo "Install Tailscale first." >&2; exit 1; }
+if systemctl is-active --quiet paperboard-tailscale.service 2>/dev/null; then
+  if test "$serve_ssh" = true; then
+    systemctl restart paperboard-tailscale-serve.service
+  fi
+  echo "The boot-persistent Paperboard Tailscale service is already active."
+  exit 0
+fi
 mkdir -p "$runtime"
 chmod 700 "$runtime"
 if test -f "$pidfile" && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
@@ -56,6 +66,12 @@ fi
   echo "Tailscale did not reach the Running state." >&2
   exit 1
 }
+if test "$serve_ssh" = true; then
+  wlan_ip=$(ip -4 -o addr show dev wlan0 scope global | awk 'NR==1 {split($4, part, "/"); print part[1]}')
+  test -n "$wlan_ip" || { echo "Wi-Fi must be connected before enabling private SSH forwarding." >&2; exit 1; }
+  "$binary" --socket="$socket" serve --bg --yes --tcp=22 "tcp://$wlan_ip:22" >/dev/null
+  echo "Tailnet-only SSH forwarding is enabled. Funnel remains disabled."
+fi
 echo "Tailscale is connected (peer details redacted)."
 echo "SOCKS5 proxy ready on loopback port 1055. No kernel routes were changed."
 REMOTE

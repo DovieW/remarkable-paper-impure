@@ -25,7 +25,7 @@ Rectangle {
     // the latter case landscapeCanvas rotates the complete UI as one unit.
     readonly property real unit: Math.max(0.65, Math.min(landscapeCanvas.width / 1872, landscapeCanvas.height / 1404))
     readonly property color ink: "#171713"
-    readonly property color paper: "#f1efe6"
+    readonly property color paper: "#ffffff"
     readonly property color muted: "#66645c"
     readonly property color shade: "#dedbd0"
     readonly property color urgent: "#171713"
@@ -161,7 +161,7 @@ Rectangle {
         else if (command.action === "show_controls") showControls()
         else if (command.action === "hide_controls") hideControls()
         else if (command.action === "refresh") { endpoint.sendMessage(1, "refresh"); showToast("Refreshing") }
-        else if (command.action === "return") { endpoint.sendMessage(7, JSON.stringify({id: command.id, status: "completed", detail: "Returning to launcher"})); returnToLauncher(); return }
+        else if (command.action === "return") { endpoint.sendMessage(7, JSON.stringify({id: command.id, status: "completed", detail: "Exiting to launcher"})); returnToLauncher(); return }
         else ok = false
         endpoint.sendMessage(7, JSON.stringify({id: command.id, status: ok ? "completed" : "failed", detail: ok ? (lastResult || "Command completed") : "Command could not be completed"}))
     }
@@ -261,6 +261,15 @@ Rectangle {
             anchors.fill: parent
             anchors.margins: 58 * root.unit
 
+        Rectangle {
+            anchors.top: parent.top
+            width: parent.width
+            height: masthead.height
+            visible: root.controlsVisible
+            color: paper
+            z: 9
+        }
+
         Row {
             id: masthead
             width: parent.width
@@ -297,8 +306,6 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
             }
         }
-
-        Rectangle { id: topRule; anchors.top: masthead.bottom; width: parent.width; height: 3 * root.unit; color: ink; visible: root.controlsVisible; z: 10 }
 
         Item {
             id: content
@@ -414,7 +421,14 @@ Rectangle {
             }
         }
 
-        Rectangle { id: statusRule; anchors.bottom: statusBar.top; width: parent.width; height: 2 * root.unit; color: ink; visible: root.controlsVisible; z: 10 }
+        Rectangle {
+            anchors.bottom: parent.bottom
+            width: parent.width
+            height: statusBar.height + controls.height
+            visible: root.controlsVisible
+            color: paper
+            z: 9
+        }
 
         Row {
             id: statusBar
@@ -453,7 +467,7 @@ Rectangle {
             z: 10
 
             Repeater {
-                model: ["PREV", "NEXT", "PIN", "DISMISS", "AMBIENT", "REFRESH", "RETURN"]
+                model: ["PREV", "NEXT", "PIN", "DISMISS", "AMBIENT", "REFRESH", "EXIT"]
                 Rectangle {
                     required property string modelData
                     width: (controls.width - controls.spacing * 6) / 7
@@ -479,7 +493,7 @@ Rectangle {
                             else if (modelData === "DISMISS" && root.currentCard.id) endpoint.sendMessage(4, root.currentCard.id)
                             else if (modelData === "AMBIENT") { if (root.ambientMode) { root.ambientMode = false; root.visualChanged(1); root.showToast("Ambient mode off"); root.reportState() } else root.selectAmbient(true) }
                             else if (modelData === "REFRESH") { endpoint.sendMessage(1, "refresh"); root.showToast("Refreshing") }
-                            else if (modelData === "RETURN") root.returnToLauncher()
+                            else if (modelData === "EXIT") root.returnToLauncher()
                         }
                     }
                 }
@@ -497,10 +511,10 @@ Rectangle {
                 var dx = mouse.x - startX
                 var dy = mouse.y - startY
                 if (Math.abs(dx) > 120 * root.unit && Math.abs(dx) > Math.abs(dy) * 1.35) root.move(dx < 0 ? 1 : -1)
-                else if (Math.abs(dy) > 90 * root.unit && Math.abs(dy) > Math.abs(dx)) {
-                    if ((startY > height * 0.72 && dy < 0) || (startY < height * 0.28 && dy > 0)) root.showControls()
-                } else if (!root.controlsVisible) root.showControls()
-                else root.hideControls()
+                else if (Math.abs(dx) < 28 * root.unit && Math.abs(dy) < 28 * root.unit) {
+                    if (!root.controlsVisible) root.showControls()
+                    else root.hideControls()
+                }
             }
         }
 
@@ -533,7 +547,7 @@ Rectangle {
             z: 21
             spacing: 8 * root.unit
             Repeater {
-                model: ["REFRESH", "RETURN"]
+                model: ["REFRESH", "EXIT"]
                 Rectangle {
                     required property string modelData
                     width: 150 * root.unit; height: 64 * root.unit; color: paper; border.width: 2 * root.unit; border.color: ink

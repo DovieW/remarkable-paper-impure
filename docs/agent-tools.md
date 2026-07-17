@@ -22,8 +22,9 @@ card directly.
 ## MCP server
 
 Run `pnpm mcp` as a stdio MCP server with `PAPERBOARD_URL` and
-`PAPERBOARD_TOKEN` in its process environment. Register this generic command in
-any MCP-capable agent:
+`PAPERBOARD_TOKEN` in its process environment. `PAPERBOARD_DEVICE` optionally
+provides a default device so agents can omit the device argument. Register this
+generic command in any MCP-capable agent:
 
 ```json
 {
@@ -31,10 +32,22 @@ any MCP-capable agent:
   "args": ["--dir", "/absolute/path/to/remarkable", "mcp"],
   "env": {
     "PAPERBOARD_URL": "https://PRIVATE-TAILNET-NAME",
-    "PAPERBOARD_TOKEN": "load-this-from-a-secret-manager"
+    "PAPERBOARD_TOKEN": "load-this-from-a-secret-manager",
+    "PAPERBOARD_DEVICE": "paper-pure"
   }
 }
 ```
+
+For a machine that should not contain the source tree or build dependencies,
+create the single-file Node.js 24 bundle on a trusted build host:
+
+```bash
+scripts/build-paperboard-mcp-bundle.sh
+```
+
+Deploy both `build/paperboard-mcp.mjs` and its checksum, verify the checksum on
+the target, and run the bundle with Node.js 24. The bundle contains the same
+Paperboard and Canvas MCP tools; it does not contain relay credentials.
 
 Do not commit a real hostname or token in an agent configuration. Prefer the
 agent's secret store or a private generated config outside the repository.
@@ -79,6 +92,19 @@ To disable the control inbox, restore the timestamped upstream extension with
 then repeat without `--dry-run`. This restarts the stock UI. Rebuild and
 revalidate the patch whenever AppLoad, Xovi, or the reMarkable OS changes; do
 not carry the binary across firmware versions by assumption.
+
+## Agent vocabulary
+
+Use these terms consistently in an agent's local instructions:
+
+- **screen** means an interactive **Paperboard Canvas** session. Creating a
+  screen uses `canvas_start`; making it visible requires a separate, explicit
+  Canvas application launch.
+- **dashboard** means the ambient **Paperboard** card queue. Updating a
+  dashboard uses `paperboard_show` or `paperboard_update` and must never launch
+  Paperboard or take over the foreground app.
+- **tablet display** means the physical display state observed by
+  `tablet_status` or `tablet_screenshot`; it is not a synonym for screen.
 
 ## Trusted-host tablet companion
 

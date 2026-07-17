@@ -11,7 +11,7 @@ COPY apps/relay apps/relay
 RUN pnpm --filter @paperboard/core build && pnpm --filter @paperboard/relay build && pnpm deploy --filter @paperboard/relay --prod /output
 
 FROM node:24.15.0-alpine
-RUN apk add --no-cache openssh-client tini su-exec && addgroup -S paperboard && adduser -S -G paperboard -h /app paperboard \
+RUN apk add --no-cache bash openssh-client tini su-exec && addgroup -S paperboard && adduser -S -G paperboard -h /app paperboard \
     && mkdir -p /data && chown paperboard:paperboard /data
 WORKDIR /app
 COPY --from=build --chown=paperboard:paperboard /output ./

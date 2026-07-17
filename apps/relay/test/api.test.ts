@@ -60,6 +60,29 @@ esac
   assert.equal(screenshot.rawPayload.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
 });
 
+test("tablet screenshot bridge failures return JSON instead of an invalid PNG response", async (context) => {
+  const root = mkdtempSync(join(tmpdir(), "paperboard-bridge-failure-"));
+  const bridge = join(root, "bridge.sh");
+  writeFileSync(bridge, "#!/bin/sh\necho 'tablet unreachable' >&2\nexit 1\n", { mode: 0o700 });
+  chmodSync(bridge, 0o700);
+  const current = fixture(bridge);
+  context.after(async () => {
+    await current.adminApp.close();
+    await current.app.close();
+    rmSync(current.root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  });
+  const credentials = await provision(current.adminApp, current.config.adminToken);
+  const response = await current.app.inject({
+    method: "GET",
+    url: "/v1/devices/pure-one/tablet/screenshot",
+    headers: { authorization: `Bearer ${credentials.clientToken}` },
+  });
+  assert.equal(response.statusCode, 400);
+  assert.match(response.headers["content-type"] ?? "", /^application\/json/);
+  assert.equal(typeof response.json().error, "string");
+});
+
 test("card lifecycle is authenticated, idempotent, ordered, and isolated", async (context) => {
   const current = fixture();
   context.after(async () => { await current.adminApp.close(); await current.app.close(); rmSync(current.root, { recursive: true, force: true }); });
@@ -200,4 +223,32 @@ test("Canvas sessions carry structured messages and acknowledged events", async 
   assert.equal(events.json().events[0].value, "pizza");
   const ack = await current.app.inject({ method: "POST", url: `/v1/devices/pure-one/canvas/sessions/${sessionId}/events/${event.json().id}/ack`, headers: clientHeaders });
   assert.equal(ack.statusCode, 204);
+});
+
+test("Canvas history spans sessions and retains the newest 100 displays", async (context) => {
+  const current = fixture();
+  context.after(async () => { await current.adminApp.close(); await current.app.close(); rmSync(current.root, { recursive: true, force: true }); });
+  const credentials = await provision(current.adminApp, current.config.adminToken);
+  const first = current.store.createCanvasSession("pure-one", "First session");
+  const oldest = current.store.createCanvasMessage("pure-one", first.id, { title: "Oldest", body: "Pruned", actions: [] });
+  const retained = current.store.createCanvasMessage("pure-one", first.id, { title: "First retained", body: "Still here", actions: [] });
+  assert.ok(oldest && retained);
+  const second = current.store.createCanvasSession("pure-one", "Second session");
+  for (let index = 0; index < 99; index += 1) {
+    assert.ok(current.store.createCanvasMessage("pure-one", second.id, { title: `Display ${index}`, body: "History", actions: [] }));
+  }
+
+  const poll = await current.app.inject({
+    method: "GET", url: "/v1/device/pure-one/canvas/poll?cursor=0&wait=0",
+    headers: { authorization: `Bearer ${credentials.deviceToken}` },
+  });
+  assert.equal(poll.statusCode, 200);
+  assert.equal(poll.json().messages.length, 100);
+  assert.equal(poll.json().session.messages.length, 100);
+  assert.equal(poll.json().messages[0].id, retained.id);
+  assert.equal(poll.json().messages[0].session_id, first.id);
+  assert.equal(poll.json().messages[0].session_title, "First session");
+  assert.equal(poll.json().messages.at(-1).session_id, second.id);
+  assert.equal(poll.json().messages.some((message: { id: string }) => message.id === oldest.id), false);
+  assert.ok(poll.json().cursor > second.cursor);
 });

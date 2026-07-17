@@ -88,6 +88,12 @@ that logical space; verify orientation before injecting input. The helper
 creates a temporary `/dev/uinput` touchscreen for one tap or one bounded swipe
 and then destroys it. It does not run a daemon or open a port.
 
+[Paper Pure Remote](remote.md) can hold that same bounded helper open through
+one authenticated SSH child while its loopback-only viewer is running. This
+avoids repeating Qt's input-device discovery delay. The process accepts only
+tap and swipe records, exits with the viewer, and never becomes a tablet
+service or listener.
+
 Paperboard itself is landscape-first and may rotate an `1872x1404` canvas
 inside that raw portrait coordinate space. Do not treat Paperboard's visible
 landscape coordinates as `paperctl.sh` tap coordinates; capture and inspect a

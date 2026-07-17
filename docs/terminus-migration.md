@@ -92,7 +92,7 @@ Verify in this order:
 5. Confirm the Paperboard cursor advances while the tablet remains in the
    stock UI.
 6. Open Paperboard manually and visually confirm the ambient screen.
-7. Use RETURN and verify the tablet backend stops.
+7. Use EXIT and verify the tablet backend stops.
 
 Only after those checks should DNS/Serve names or the Paperboard provider
 configuration be switched permanently. Retain the old deployment until at

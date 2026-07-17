@@ -14,6 +14,9 @@ type CardRow = {
 type CommandRow = { id: string; device_id: string; action: PaperboardCommandAction; status: string; detail: string; created_at: string; expires_at: string; completed_at: string | null };
 type CanvasSessionRow = { id: string; device_id: string; title: string; status: string; cursor: number; created_at: string; updated_at: string };
 type CanvasMessageRow = { id: string; session_id: string; cursor: number; title: string; body: string; asset_id: string | null; actions_json: string; replace_key: string | null; created_at: string };
+type CanvasHistoryRow = CanvasMessageRow & { session_title: string };
+
+export const CANVAS_HISTORY_LIMIT = 100;
 
 export interface DeviceStatus {
   id: string;
@@ -54,6 +57,7 @@ export class Store {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS devices (
         id TEXT PRIMARY KEY, token_hash TEXT NOT NULL, cursor INTEGER NOT NULL DEFAULT 0,
+        canvas_cursor INTEGER NOT NULL DEFAULT 0,
         last_seen_at TEXT, last_ack_cursor INTEGER NOT NULL DEFAULT 0,
         provider_kind TEXT NOT NULL DEFAULT 'none', provider_config TEXT,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -108,6 +112,7 @@ export class Store {
         replace_key TEXT, created_at TEXT NOT NULL
       );
       CREATE UNIQUE INDEX IF NOT EXISTS canvas_messages_replace_key ON canvas_messages(session_id, replace_key) WHERE replace_key IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS canvas_messages_session_cursor ON canvas_messages(session_id, cursor);
       CREATE TABLE IF NOT EXISTS canvas_events (
         id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES canvas_sessions(id) ON DELETE CASCADE,
         cursor INTEGER NOT NULL, message_id TEXT NOT NULL REFERENCES canvas_messages(id) ON DELETE CASCADE,
@@ -115,6 +120,18 @@ export class Store {
         created_at TEXT NOT NULL
       );
     `);
+    const deviceColumns = this.db.prepare("PRAGMA table_info(devices)").all() as Array<{ name: string }>;
+    if (!deviceColumns.some((column) => column.name === "canvas_cursor")) {
+      this.db.exec("ALTER TABLE devices ADD COLUMN canvas_cursor INTEGER NOT NULL DEFAULT 0");
+      this.db.exec(`
+        UPDATE devices SET canvas_cursor = (
+          SELECT COUNT(*) + (SELECT COUNT(*) FROM canvas_sessions WHERE device_id=devices.id)
+          FROM canvas_messages
+          JOIN canvas_sessions ON canvas_sessions.id=canvas_messages.session_id
+          WHERE canvas_sessions.device_id=devices.id
+        )
+      `);
+    }
   }
 
   createDevice(id: string, tokenHash: string): void {
@@ -297,9 +314,12 @@ export class Store {
   }
 
   createCanvasSession(deviceId: string, title: string): CanvasSessionRow {
-    const id = randomUUID().replaceAll("-", ""); const now = new Date().toISOString();
-    this.db.prepare("INSERT INTO canvas_sessions(id, device_id, title, status, created_at, updated_at) VALUES (?, ?, ?, 'open', ?, ?)").run(id, deviceId, title, now, now);
-    return this.getCanvasSession(deviceId, id)!;
+    return this.transaction(() => {
+      const id = randomUUID().replaceAll("-", ""); const now = new Date().toISOString();
+      this.db.prepare("INSERT INTO canvas_sessions(id, device_id, title, status, created_at, updated_at) VALUES (?, ?, ?, 'open', ?, ?)").run(id, deviceId, title, now, now);
+      this.advanceCanvasCursor(deviceId);
+      return this.getCanvasSession(deviceId, id)!;
+    });
   }
 
   getCanvasSession(deviceId: string, id: string): CanvasSessionRow | undefined {
@@ -315,7 +335,32 @@ export class Store {
   }
 
   closeCanvasSession(deviceId: string, id: string): boolean {
-    return this.db.prepare("UPDATE canvas_sessions SET status='closed', updated_at=? WHERE device_id=? AND id=?").run(new Date().toISOString(), deviceId, id).changes === 1;
+    return this.transaction(() => {
+      const closed = this.db.prepare("UPDATE canvas_sessions SET status='closed', updated_at=? WHERE device_id=? AND id=?").run(new Date().toISOString(), deviceId, id).changes === 1;
+      if (closed) this.advanceCanvasCursor(deviceId);
+      return closed;
+    });
+  }
+
+  canvasCursor(deviceId: string): number {
+    return Number((this.db.prepare("SELECT canvas_cursor FROM devices WHERE id=?").get(deviceId) as { canvas_cursor?: number } | undefined)?.canvas_cursor ?? 0);
+  }
+
+  private advanceCanvasCursor(deviceId: string): void {
+    this.db.prepare("UPDATE devices SET canvas_cursor=canvas_cursor+1 WHERE id=?").run(deviceId);
+  }
+
+  private pruneCanvasHistory(deviceId: string): void {
+    this.db.prepare(`
+      DELETE FROM canvas_messages WHERE id IN (
+        SELECT message.id
+        FROM canvas_messages AS message
+        JOIN canvas_sessions AS session ON session.id=message.session_id
+        WHERE session.device_id=?
+        ORDER BY message.created_at DESC, message.rowid DESC
+        LIMIT -1 OFFSET ?
+      )
+    `).run(deviceId, CANVAS_HISTORY_LIMIT);
   }
 
   createCanvasMessage(deviceId: string, sessionId: string, input: CanvasMessageInput): CanvasMessageRow | undefined {
@@ -326,6 +371,8 @@ export class Store {
       this.db.prepare("INSERT INTO canvas_messages(id, session_id, cursor, title, body, asset_id, actions_json, replace_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
         .run(id, sessionId, cursor, input.title, input.body, input.asset_id ?? null, JSON.stringify(input.actions), input.replace_key ?? null, now);
       this.db.prepare("UPDATE canvas_sessions SET cursor=?, updated_at=? WHERE id=?").run(cursor, now, sessionId);
+      this.advanceCanvasCursor(deviceId);
+      this.pruneCanvasHistory(deviceId);
       return this.getCanvasMessage(sessionId, id)!;
     });
   }
@@ -340,6 +387,23 @@ export class Store {
     return rows.map((row) => ({ id: row.id, cursor: row.cursor, title: row.title, body: row.body, asset_id: row.asset_id,
       ...(row.asset_id && assetBaseUrl ? { asset_url: `${assetBaseUrl}/v1/device/${deviceId}/assets/${row.asset_id}` } : {}),
       actions: JSON.parse(row.actions_json), created_at: row.created_at }));
+  }
+
+  canvasHistory(deviceId: string, assetBaseUrl?: string): Array<Record<string, unknown>> {
+    const rows = this.db.prepare(`
+      SELECT message.*, session.title AS session_title
+      FROM canvas_messages AS message
+      JOIN canvas_sessions AS session ON session.id=message.session_id
+      WHERE session.device_id=?
+      ORDER BY message.created_at DESC, message.rowid DESC
+      LIMIT ?
+    `).all(deviceId, CANVAS_HISTORY_LIMIT) as CanvasHistoryRow[];
+    return rows.reverse().map((row) => ({
+      id: row.id, session_id: row.session_id, session_title: row.session_title,
+      cursor: row.cursor, title: row.title, body: row.body, asset_id: row.asset_id,
+      ...(row.asset_id && assetBaseUrl ? { asset_url: `${assetBaseUrl}/v1/device/${deviceId}/assets/${row.asset_id}` } : {}),
+      actions: JSON.parse(row.actions_json), created_at: row.created_at,
+    }));
   }
 
   createCanvasEvent(deviceId: string, sessionId: string, input: CanvasEventInput): Record<string, unknown> | undefined {

@@ -12,6 +12,32 @@ acknowledges those events through the same authenticated client API, CLI, or MCP
 surface. V1 intentionally has no on-screen keyboard and does not attempt
 handwriting recognition.
 
+Canvas stores the newest 100 displays across sessions. Previous and next
+navigation therefore survives agents opening a fresh session for later work;
+replace-key updates remain replacements so progress ticks do not flood history.
+Text history is small (at most roughly 1.2 MB when every body reaches the
+12 KB limit), while image assets retain their separate expiration policy.
+
+The white-backed header and footer begin hidden and overlay rather than consume
+content space. Tap the reading surface to reveal them and tap the surface again
+to dismiss them; they also hide automatically after six seconds. The footer
+provides previous, next, return-to-top, refresh, and Exit controls. Horizontal
+swipes also move through history and require a clearly dominant horizontal
+gesture so ordinary vertical reading does not navigate accidentally.
+
+Canvas is deliberately temporary foreground UI. One hour after it opens, it
+launches Paperboard and closes itself so an abandoned interactive screen returns
+to the quiet dashboard automatically.
+
+The message body and actions use one-finger kinetic vertical scrolling without
+page snapping. A slim position marker appears only when content overflows. New
+messages and explicit history navigation start at the top.
+
+The session title appears only in the optional header, while each message title
+is the visible content heading. Agents should not repeat that message title as
+the first Markdown heading in the body; doing so intentionally renders two
+matching content headings.
+
 ```bash
 set -a; . secrets/clients/local-agent.env; set +a
 session=$(pnpm paperboard canvas start --device paper-pure --title "Dinner" | jq -r .id)

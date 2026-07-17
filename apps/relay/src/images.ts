@@ -75,8 +75,8 @@ export async function normalizeImage(input: Buffer): Promise<{ png: Buffer; sha2
   }
   const png = await decoder
     .rotate()
-    .flatten({ background: "#f1efe6" })
-    .resize(SCREEN_WIDTH, SCREEN_HEIGHT, { fit: "contain", background: "#f1efe6", withoutEnlargement: false })
+    .flatten({ background: "#ffffff" })
+    .resize(SCREEN_WIDTH, SCREEN_HEIGHT, { fit: "contain", background: "#ffffff", withoutEnlargement: false })
     .grayscale()
     .png({ compressionLevel: 9, colours: 256, dither: 0.8 })
     .toBuffer();

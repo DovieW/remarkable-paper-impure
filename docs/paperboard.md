@@ -21,9 +21,10 @@ remain in ignored mode-0600 files.
 - Urgent, pinned, normal, and ambient ordering.
 - Replace keys for one continuously updated status card.
 - Default five-minute TTL, maximum 24 hours, or explicit pinning.
-- Hidden-by-default chrome, horizontal card swipes, edge-swipe controls, and
-  visible two-second feedback for every action.
-- Previous/next, pin, dismiss, persistent ambient mode, refresh, and return.
+- Hidden-by-default chrome, horizontal card swipes, tap-only chrome controls,
+  and visible two-second feedback for every action. Movement never opens or
+  dismisses the chrome.
+- Previous/next, pin, dismiss, persistent ambient mode, refresh, and exit.
 - Authenticated long polling with cursor acknowledgements and offline catch-up.
 - TRMNL Hosted BYOD and self-hosted Terminus as optional ambient providers.
 - Client-scoped API, CLI, and MCP parity for cards, delivery status,
@@ -32,13 +33,13 @@ remain in ignored mode-0600 files.
 - No background display takeover. The app and relay polling client exist only
   while Paperboard is in the foreground.
 
-The RETURN control calls AppLoad's `terminate()` operation, which kills the
+The EXIT control calls AppLoad's `terminate()` operation, which kills the
 backend and immediately unloads every Paperboard frontend. It deliberately
 does not also emit the frontend `close` signal: mixing the two lifecycle paths
 can race the permanent unload and allow a resident frontend to relaunch the
 backend later.
 
-The top and bottom chrome do not consume content space. They begin hidden;
+The borderless top and bottom chrome do not consume content space. They begin hidden;
 swipe upward from the bottom or downward from the top to reveal them. A
 horizontal swipe moves between cards and leaves ambient mode. Ambient mode
 continues selecting the highest-ranked ambient frame as provider snapshots
@@ -162,7 +163,7 @@ tablet.
 
 Paperboard is deliberately manual-launch through AppLoad. Do not configure it
 to start on boot or when a card is posted: agent and provider output must queue
-without interrupting notebooks, reading, or the stock interface. RETURN uses
+without interrupting notebooks, reading, or the stock interface. EXIT uses
 AppLoad's permanent unload path, so later relay activity cannot relaunch the
 tablet client. Auto sleep is independent of this policy and may remain disabled
 during an owner-approved powered desk deployment.

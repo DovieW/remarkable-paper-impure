@@ -6,5 +6,6 @@ const url = process.env.PAPERBOARD_URL ?? "http://127.0.0.1:8787";
 const token = process.env.PAPERBOARD_TOKEN;
 if (!token) throw new Error("PAPERBOARD_TOKEN is required");
 const client = new PaperboardClient({ baseUrl: url, token });
-const server = createPaperboardMcpServer(client);
+const defaultDevice = process.env.PAPERBOARD_DEVICE;
+const server = createPaperboardMcpServer(client, defaultDevice ? { defaultDevice } : {});
 await server.connect(new StdioServerTransport());

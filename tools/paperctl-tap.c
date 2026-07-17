@@ -92,25 +92,8 @@ static void emit_position(int device, int x, int y)
     emit_event(device, EV_SYN, SYN_REPORT, 0);
 }
 
-int main(int argc, char **argv)
+static int create_touchscreen(void)
 {
-    if (argc != 3 && argc != 6) {
-        fprintf(stderr, "Usage: %s X Y\n", argv[0]);
-        fprintf(stderr, "       %s X1 Y1 X2 Y2 DURATION_MS\n", argv[0]);
-        fprintf(stderr, "Coordinates use the 1404x1872 screenshot space.\n");
-        return EXIT_FAILURE;
-    }
-
-    const int start_x = (int)parse_coordinate(argv[1], SCREEN_MAX_X, "X1");
-    const int start_y = (int)parse_coordinate(argv[2], SCREEN_MAX_Y, "Y1");
-    const bool is_swipe = argc == 6;
-    const int end_x = is_swipe ? (int)parse_coordinate(argv[3], SCREEN_MAX_X, "X2") : start_x;
-    const int end_y = is_swipe ? (int)parse_coordinate(argv[4], SCREEN_MAX_Y, "Y2") : start_y;
-    const long duration = is_swipe ? parse_coordinate(argv[5], 5000, "DURATION_MS") : 100;
-    if (is_swipe && duration < 100) {
-        fprintf(stderr, "paperctl-tap: DURATION_MS must be between 100 and 5000\n");
-        return EXIT_FAILURE;
-    }
     const int device = open("/dev/uinput", O_WRONLY | O_NONBLOCK | O_CLOEXEC);
     if (device < 0) {
         fail("could not open /dev/uinput");
@@ -158,6 +141,12 @@ int main(int argc, char **argv)
 
     /* Allow Qt's input discovery enough time to observe this hotplug device. */
     sleep_milliseconds(2500);
+    return device;
+}
+
+static void perform_gesture(int device, int start_x, int start_y, int end_x,
+                            int end_y, long duration, bool is_swipe)
+{
 
     emit_event(device, EV_ABS, ABS_MT_SLOT, 0);
     emit_event(device, EV_ABS, ABS_MT_TRACKING_ID, 1);
@@ -189,10 +178,93 @@ int main(int argc, char **argv)
     emit_event(device, EV_KEY, BTN_TOUCH, 0);
     emit_event(device, EV_SYN, SYN_REPORT, 0);
 
-    sleep_milliseconds(750);
+    /* Let the consumer observe release before acknowledging the command. */
+    sleep_milliseconds(50);
+}
+
+static void destroy_touchscreen(int device)
+{
     if (ioctl(device, UI_DEV_DESTROY) < 0) {
         fail("could not destroy virtual touchscreen");
     }
     close(device);
+}
+
+static int serve_commands(void)
+{
+    const int device = create_touchscreen();
+    char line[256];
+    puts("READY");
+    fflush(stdout);
+
+    while (fgets(line, sizeof(line), stdin) != NULL) {
+        char *save = NULL;
+        char *tokens[7] = {0};
+        size_t count = 0;
+        for (char *token = strtok_r(line, " \t\r\n", &save);
+             token != NULL && count < 7;
+             token = strtok_r(NULL, " \t\r\n", &save)) {
+            tokens[count++] = token;
+        }
+
+        if (count == 3 && strcmp(tokens[0], "tap") == 0) {
+            const int x = (int)parse_coordinate(tokens[1], SCREEN_MAX_X, "X");
+            const int y = (int)parse_coordinate(tokens[2], SCREEN_MAX_Y, "Y");
+            perform_gesture(device, x, y, x, y, 100, false);
+        } else if (count == 6 && strcmp(tokens[0], "swipe") == 0) {
+            const int x1 = (int)parse_coordinate(tokens[1], SCREEN_MAX_X, "X1");
+            const int y1 = (int)parse_coordinate(tokens[2], SCREEN_MAX_Y, "Y1");
+            const int x2 = (int)parse_coordinate(tokens[3], SCREEN_MAX_X, "X2");
+            const int y2 = (int)parse_coordinate(tokens[4], SCREEN_MAX_Y, "Y2");
+            const long duration = parse_coordinate(tokens[5], 5000, "DURATION_MS");
+            if (duration < 100) {
+                fprintf(stderr, "paperctl-tap: DURATION_MS must be between 100 and 5000\n");
+                destroy_touchscreen(device);
+                return EXIT_FAILURE;
+            }
+            perform_gesture(device, x1, y1, x2, y2, duration, true);
+        } else {
+            fprintf(stderr, "paperctl-tap: invalid serve command\n");
+            destroy_touchscreen(device);
+            return EXIT_FAILURE;
+        }
+        puts("OK");
+        fflush(stdout);
+    }
+
+    destroy_touchscreen(device);
+    return EXIT_SUCCESS;
+}
+
+int main(int argc, char **argv)
+{
+    if (argc == 2 && strcmp(argv[1], "--serve") == 0) {
+        return serve_commands();
+    }
+    if (argc != 3 && argc != 6) {
+        fprintf(stderr, "Usage: %s X Y\n", argv[0]);
+        fprintf(stderr, "       %s X1 Y1 X2 Y2 DURATION_MS\n", argv[0]);
+        fprintf(stderr, "       %s --serve\n", argv[0]);
+        fprintf(stderr, "Coordinates use the 1404x1872 screenshot space.\n");
+        return EXIT_FAILURE;
+    }
+
+    const int start_x = (int)parse_coordinate(argv[1], SCREEN_MAX_X, "X1");
+    const int start_y = (int)parse_coordinate(argv[2], SCREEN_MAX_Y, "Y1");
+    const bool is_swipe = argc == 6;
+    const int end_x = is_swipe ? (int)parse_coordinate(argv[3], SCREEN_MAX_X, "X2") : start_x;
+    const int end_y = is_swipe ? (int)parse_coordinate(argv[4], SCREEN_MAX_Y, "Y2") : start_y;
+    const long duration = is_swipe ? parse_coordinate(argv[5], 5000, "DURATION_MS") : 100;
+    if (is_swipe && duration < 100) {
+        fprintf(stderr, "paperctl-tap: DURATION_MS must be between 100 and 5000\n");
+        return EXIT_FAILURE;
+    }
+
+    const int device = create_touchscreen();
+    perform_gesture(device, start_x, start_y, end_x, end_y, duration, is_swipe);
+
+    /* Preserve the one-shot helper's conservative hot-unplug delay. */
+    sleep_milliseconds(750);
+    destroy_touchscreen(device);
     return EXIT_SUCCESS;
 }
