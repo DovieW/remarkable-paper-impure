@@ -17,18 +17,18 @@ test("lists the agent tools and maps progress input to a replaceable card", asyn
     status: async () => ({ queued: 1 }),
     command: async () => ({ id: "command-12345678", status: "queued" }),
     commandStatus: async () => ({ id: "command-12345678", status: "completed" }),
-    tabletStatus: async () => ({ foreground: "paperboard" }),
-    tabletApps: async () => ({ apps: ["paperboard", "canvas"] }),
-    tabletLaunch: async () => ({ launched: "paperboard" }),
-    tabletReturn: async () => ({ returned: true }),
-    tabletScreenshot: async () => Buffer.from("89504e470d0a1a0a", "hex"),
-    createCanvasSession: async () => ({ id: "session-12345678" }),
-    listCanvasSessions: async () => ({ sessions: [] }),
-    getCanvasSession: async () => ({ id: "session-12345678", messages: [] }),
-    sendCanvasMessage: async () => ({ id: "message-12345678" }),
-    canvasEvents: async () => ({ events: [] }),
-    acknowledgeCanvasEvent: async () => undefined,
-    closeCanvasSession: async () => ({ status: "closed" }),
+    deviceStatus: async () => ({ foreground: "paperboard" }),
+    deviceApps: async () => ({ apps: ["paperboard"] }),
+    deviceLaunch: async () => ({ launched: "paperboard" }),
+    deviceExit: async () => ({ returned: true }),
+    deviceScreenshot: async () => Buffer.from("89504e470d0a1a0a", "hex"),
+    createScreenSession: async () => ({ id: "session-12345678" }),
+    listScreenSessions: async () => ({ sessions: [] }),
+    getScreenSession: async () => ({ id: "session-12345678", messages: [] }),
+    presentScreen: async () => ({ id: "message-12345678" }),
+    screenEvents: async () => ({ events: [] }),
+    acknowledgeScreenEvent: async () => undefined,
+    closeScreenSession: async () => ({ status: "closed" }),
   };
   const server = createPaperboardMcpServer(relay);
   const client = new Client({ name: "paperboard-test", version: "1.0.0" });
@@ -38,12 +38,12 @@ test("lists the agent tools and maps progress input to a replaceable card", asyn
 
   const listed = await client.listTools();
   assert.deepEqual(listed.tools.map((tool) => tool.name).sort(), [
-    "canvas_ack", "canvas_close", "canvas_events", "canvas_list", "canvas_send", "canvas_start", "canvas_status",
-    "paperboard_clear", "paperboard_control", "paperboard_delete", "paperboard_get", "paperboard_list",
-    "paperboard_show", "paperboard_show_image", "paperboard_status", "paperboard_update", "paperboard_wait",
-    "tablet_apps", "tablet_launch", "tablet_return", "tablet_screenshot", "tablet_status",
+    "dashboard_asset_upload", "dashboard_clear", "dashboard_delete", "dashboard_get", "dashboard_list", "dashboard_show",
+    "dashboard_show_image", "dashboard_update", "dashboard_wait", "device_apps", "device_command_status",
+    "device_control", "device_exit", "device_launch", "device_screenshot", "device_status", "screen_ack", "screen_close",
+    "screen_events", "screen_list", "screen_present", "screen_start", "screen_status",
   ]);
-  const response = await client.callTool({ name: "paperboard_show", arguments: {
+  const response = await client.callTool({ name: "dashboard_show", arguments: {
     device: "paper-pure", title: "Building", body: "Almost there", progress: 42,
     replace_key: "build-status",
   } });
@@ -59,11 +59,11 @@ test("uses the configured default device when a tool call omits it", async (cont
     uploadAsset: async () => ({}), show: async () => ({}), update: async () => ({}),
     list: async (device: string) => { selectedDevice = device; return { cards: [] }; },
     get: async () => ({}), delete: async () => undefined, clear: async () => ({}), status: async () => ({}),
-    command: async () => ({}), commandStatus: async () => ({}), tabletStatus: async () => ({}), tabletApps: async () => ({}),
-    tabletLaunch: async () => ({}), tabletReturn: async () => ({}), tabletScreenshot: async () => Buffer.alloc(0),
-    createCanvasSession: async () => ({}), listCanvasSessions: async () => ({}), getCanvasSession: async () => ({}),
-    sendCanvasMessage: async () => ({}), canvasEvents: async () => ({}), acknowledgeCanvasEvent: async () => undefined,
-    closeCanvasSession: async () => ({}),
+    command: async () => ({}), commandStatus: async () => ({}), deviceStatus: async () => ({}), deviceApps: async () => ({}),
+    deviceLaunch: async () => ({}), deviceExit: async () => ({}), deviceScreenshot: async () => Buffer.alloc(0),
+    createScreenSession: async () => ({}), listScreenSessions: async () => ({}), getScreenSession: async () => ({}),
+    presentScreen: async () => ({}), screenEvents: async () => ({}), acknowledgeScreenEvent: async () => undefined,
+    closeScreenSession: async () => ({}),
   } as PaperboardToolClient;
   const server = createPaperboardMcpServer(relay, { defaultDevice: "paper-pure" });
   const client = new Client({ name: "paperboard-default-device-test", version: "1.0.0" });
@@ -71,7 +71,7 @@ test("uses the configured default device when a tool call omits it", async (cont
   context.after(async () => { await client.close(); await server.close(); });
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
 
-  const response = await client.callTool({ name: "paperboard_list", arguments: {} });
+  const response = await client.callTool({ name: "dashboard_list", arguments: {} });
   assert.equal(response.isError, undefined);
   assert.equal(selectedDevice, "paper-pure");
 });

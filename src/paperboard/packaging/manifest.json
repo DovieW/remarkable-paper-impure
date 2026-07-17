@@ -3,6 +3,7 @@
   "loadsBackend": true,
   "entry": "/qml/Main.qml",
   "id": "paperboard",
+  "version": "2.0.0",
   "supportsScaling": true,
   "canHaveMultipleFrontends": false
 }

@@ -46,6 +46,34 @@ services:
     cap_add: [SETUID, SETGID]
     group_add: ["${PAPERBOARD_SECRET_GID:?set host secret group}"]
 
+  remote:
+    build:
+      context: ../..
+      dockerfile: apps/remote/Dockerfile
+    network_mode: service:tailscale
+    environment:
+      PAPER_REMOTE_BIND: 127.0.0.1
+      PAPER_REMOTE_PORT: 4174
+      PAPER_REMOTE_INPUT_ENABLED: "${PAPER_REMOTE_INPUT_ENABLED:-false}"
+      PAPER_REMOTE_KILL_SWITCH: /control/remote.disabled
+      PAPER_REMOTE_BASE_PATH: /remote
+      PAPER_REMOTE_FORCED_COMMAND: "true"
+      REMARKABLE_HOST: remarkable-bridge
+    volumes:
+      - ${PAPERBOARD_TABLET_SSH_DIR:?set restricted SSH directory}:/app/.ssh:ro
+      - ${PAPERBOARD_REMOTE_CONTROL_DIR:?set remote control directory}:/control
+    depends_on: [tailscale]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp:size=64m,mode=1777]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4174/api/session').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+
 secrets:
   master_key:
     file: ${PAPERBOARD_MASTER_KEY_FILE:?set master-key file}

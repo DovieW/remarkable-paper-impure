@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const repositoryRoot = process.env.PAPERBOARD_REPOSITORY_ROOT ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 export interface TabletStatus {
   platform: string;
@@ -24,12 +24,13 @@ export interface TabletController {
   status(): Promise<TabletStatus>;
   tap(x: number, y: number): Promise<void>;
   swipe(x1: number, y1: number, x2: number, y2: number, durationMs: number): Promise<void>;
-  control(action: "paperboard" | "canvas" | "exit"): Promise<unknown>;
+  control(action: "paperboard" | "screen" | "exit"): Promise<unknown>;
   close(): Promise<void>;
 }
 
 export class SshTabletController implements TabletController {
   readonly #host: string;
+  readonly #forcedCommand: boolean;
   readonly #temporaryDirectoryPromise: Promise<string>;
   #captureInFlight: Promise<Buffer> | null = null;
   #inputProcess: ChildProcessWithoutNullStreams | null = null;
@@ -41,6 +42,7 @@ export class SshTabletController implements TabletController {
   constructor(host = "remarkable-usb") {
     if (!/^[a-zA-Z0-9_.-]{1,128}$/.test(host)) throw new Error("invalid SSH host alias");
     this.#host = host;
+    this.#forcedCommand = process.env.PAPER_REMOTE_FORCED_COMMAND === "true";
     this.#temporaryDirectoryPromise = mkdtemp(join(tmpdir(), "paper-remote-"));
     /* Pay the Qt input-discovery cost before the owner sends the first tap. */
     void this.#ensureInputChannel().catch(() => undefined);
@@ -54,6 +56,12 @@ export class SshTabletController implements TabletController {
   }
 
   async #capture(): Promise<Buffer> {
+    if (this.#forcedCommand) {
+      const { stdout } = await execFileAsync("ssh", ["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", this.#host, "paperboard-control", "screenshot"], { encoding: "buffer", timeout: 15_000, maxBuffer: 16 * 1024 * 1024 });
+      const frame = Buffer.from(stdout);
+      if (frame.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a") throw new Error("tablet control did not return a PNG");
+      return frame;
+    }
     const directory = await this.#temporaryDirectoryPromise;
     const output = join(directory, "current.png");
     await execFileAsync(join(repositoryRoot, "scripts/paperctl.sh"), ["screenshot", output], {
@@ -64,6 +72,11 @@ export class SshTabletController implements TabletController {
   }
 
   async status(): Promise<TabletStatus> {
+    if (this.#forcedCommand) {
+      const { stdout } = await execFileAsync("ssh", ["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", this.#host, "paperboard-control", "status"], { timeout: 15_000 });
+      const status = JSON.parse(stdout) as TabletStatus & { screenshot_available?: boolean };
+      return { ...status, lock_state: status.lock_state ?? "unknown", screenshot: status.screenshot ?? status.screenshot_available ?? false, input_helper: status.input_helper ?? true };
+    }
     const { stdout } = await execFileAsync(join(repositoryRoot, "scripts/tablet-companion.sh"), ["status"], {
       env: { ...process.env, REMARKABLE_HOST: this.#host }, timeout: 15_000,
     });
@@ -102,9 +115,12 @@ export class SshTabletController implements TabletController {
   #ensureInputChannel(): Promise<void> {
     if (this.#inputReady) return this.#inputReady;
     this.#inputError = "";
+    const remoteCommand = this.#forcedCommand
+      ? ["paperboard-control", "input"]
+      : ["/home/root/.local/bin/paperctl-tap", "--serve"];
     const process = spawn("ssh", [
       "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", this.#host,
-      "/home/root/.local/bin/paperctl-tap", "--serve",
+      ...remoteCommand,
     ]);
     this.#inputProcess = process;
     process.stderr.setEncoding("utf8");
@@ -134,12 +150,12 @@ export class SshTabletController implements TabletController {
     return this.#inputReady;
   }
 
-  async control(action: "paperboard" | "canvas" | "exit"): Promise<unknown> {
+  async control(action: "paperboard" | "screen" | "exit"): Promise<unknown> {
     const command = action === "exit"
       ? "paperboard-control return"
-      : `paperboard-control launch ${action}`;
-    const remote = `SSH_ORIGINAL_COMMAND='${command}' /home/root/.local/bin/paperboard-control`;
-    const { stdout } = await execFileAsync("ssh", ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", this.#host, remote], { timeout: 15_000 });
+      : "paperboard-control launch paperboard";
+    const remote = this.#forcedCommand ? command.split(" ") : [`SSH_ORIGINAL_COMMAND='${command}'`, "/home/root/.local/bin/paperboard-control"];
+    const { stdout } = await execFileAsync("ssh", ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", this.#host, ...remote], { timeout: 15_000 });
     return JSON.parse(stdout);
   }
 

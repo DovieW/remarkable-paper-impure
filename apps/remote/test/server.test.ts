@@ -12,13 +12,13 @@ class FakeController implements TabletController {
   async status(): Promise<TabletStatus> { return { platform: "imx93-tatsu", architecture: "aarch64", foreground: "stock", lock_state: "unknown", screenshot: true, input_helper: true }; }
   async tap(x: number, y: number) { this.inputs.push({ action: "tap", x, y }); }
   async swipe(x1: number, y1: number, x2: number, y2: number, durationMs: number) { this.inputs.push({ action: "swipe", x1, y1, x2, y2, durationMs }); }
-  async control(action: "paperboard" | "canvas" | "exit") { this.controls.push(action); return { accepted: action }; }
+  async control(action: "paperboard" | "screen" | "exit") { this.controls.push(action); return { accepted: action }; }
   async close() {}
 }
 
 async function fixture(context: test.TestContext) {
   const controller = new FakeController();
-  const current = buildRemoteServer(controller);
+  const current = buildRemoteServer(controller, { inputEnabled: true, killSwitchPath: "/path/that/does/not/exist" });
   current.server.listen(0, "127.0.0.1");
   await once(current.server, "listening");
   context.after(() => current.server.close());
@@ -38,25 +38,34 @@ test("serves an ephemeral authenticated frame", async context => {
   assert.equal(Buffer.from(await response.arrayBuffer()).subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
 });
 
-test("requires an explicit unlock confirmation and validates input bounds", async context => {
+test("allows bounded input only when the private endpoint policy enables it", async context => {
   const { controller, base, headers } = await fixture(context);
-  const locked = await fetch(`${base}/api/input`, { method: "POST", headers, body: JSON.stringify({ action: "tap", x: 10, y: 20 }) });
-  assert.equal(locked.status, 423);
-  const refused = await fetch(`${base}/api/arm`, { method: "POST", headers, body: JSON.stringify({ confirmed_unlocked: false }) });
-  assert.equal(refused.status, 400);
-  assert.equal((await fetch(`${base}/api/arm`, { method: "POST", headers, body: JSON.stringify({ confirmed_unlocked: true }) })).status, 200);
+  const started = performance.now();
   assert.equal((await fetch(`${base}/api/input`, { method: "POST", headers, body: JSON.stringify({ action: "tap", x: 1403, y: 1871 }) })).status, 200);
+  assert.ok(performance.now() - started < 250, "warm local input acknowledgement exceeded 250 ms");
   assert.deepEqual(controller.inputs, [{ action: "tap", x: 1403, y: 1871 }]);
   assert.equal((await fetch(`${base}/api/input`, { method: "POST", headers, body: JSON.stringify({ action: "tap", x: 1404, y: 0 }) })).status, 400);
 });
 
-test("exposes only fixed app controls and disarms on exit", async context => {
+test("works behind the configured Tailscale Serve subpath", async context => {
+  const controller = new FakeController();
+  const current = buildRemoteServer(controller, { basePath: "/remote" });
+  current.server.listen(0, "127.0.0.1");
+  await once(current.server, "listening");
+  context.after(() => current.server.close());
+  const address = current.server.address() as AddressInfo;
+  const response = await fetch(`http://127.0.0.1:${address.port}/remote/`);
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), /Paper Pure Remote/);
+  assert.equal((await fetch(`http://127.0.0.1:${address.port}/remote/app.js`)).status, 200);
+  assert.equal((await fetch(`http://127.0.0.1:${address.port}/remote/api/session`)).status, 200);
+});
+
+test("exposes only fixed semantic app controls", async context => {
   const { controller, base, headers } = await fixture(context);
-  await fetch(`${base}/api/arm`, { method: "POST", headers, body: JSON.stringify({ confirmed_unlocked: true }) });
-  assert.equal((await fetch(`${base}/api/control`, { method: "POST", headers, body: JSON.stringify({ action: "canvas" }) })).status, 200);
+  assert.equal((await fetch(`${base}/api/control`, { method: "POST", headers, body: JSON.stringify({ action: "screen" }) })).status, 200);
   const exited = await fetch(`${base}/api/control`, { method: "POST", headers, body: JSON.stringify({ action: "exit" }) });
   assert.equal(exited.status, 200);
-  assert.equal((await exited.json()).armed_until, 0);
-  assert.deepEqual(controller.controls, ["canvas", "exit"]);
+  assert.deepEqual(controller.controls, ["screen", "exit"]);
   assert.equal((await fetch(`${base}/api/control`, { method: "POST", headers, body: JSON.stringify({ action: "shell" }) })).status, 400);
 });

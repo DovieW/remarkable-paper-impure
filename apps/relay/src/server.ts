@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { canvasEventInputSchema, canvasMessageInputSchema, canvasSessionInputSchema, cardInputSchema, cardPatchSchema, clientScopeSchema, commandResultSchema, DEVICE_ID_PATTERN, devicePollQuerySchema, hashToken, issueToken, paperboardCommandSchema, paperboardUiStateSchema, providerSchema, tabletLaunchSchema } from "@paperboard/core";
@@ -10,6 +10,8 @@ import { MAX_INPUT_BYTES, normalizeImage, SCREEN_HEIGHT, SCREEN_WIDTH } from "./
 import { ProviderManager } from "./providers.js";
 import { Store } from "./store.js";
 import { TabletBridge } from "./tablet.js";
+import { fetchReaderPage } from "./reader.js";
+import sharp from "sharp";
 
 const deviceParamSchema = z.object({ device: z.string().regex(DEVICE_ID_PATTERN) });
 const cardParamSchema = deviceParamSchema.extend({ card: z.string().min(8).max(80) });
@@ -22,6 +24,25 @@ const commandParamSchema = deviceParamSchema.extend({ command: z.string().min(8)
 function deny(reply: FastifyReply): FastifyReply { return reply.code(401).send({ error: "unauthorized" }); }
 function bad(reply: FastifyReply, error: unknown): FastifyReply {
   return reply.code(400).send({ error: error instanceof Error ? error.message : "invalid request" });
+}
+
+function receipt(request: FastifyRequest, operation: string, value: Record<string, unknown> = {}): Record<string, unknown> {
+  return { request_id: request.id, operation, accepted_at: new Date().toISOString(), ...value };
+}
+
+async function strokePreview(value: unknown): Promise<Buffer | undefined> {
+  if (!value || typeof value !== "object" || !("strokes" in value) || !Array.isArray(value.strokes)) return undefined;
+  const paths = value.strokes.flatMap((stroke) => {
+    if (!stroke || typeof stroke !== "object" || !("points" in stroke) || !Array.isArray(stroke.points)) return [];
+    const points = stroke.points.flatMap((point: unknown) => {
+      if (!point || typeof point !== "object" || !("x" in point) || !("y" in point)) return [];
+      return [`${Math.round(Number(point.x) * 1000)},${Math.round(Number(point.y) * 600)}`];
+    });
+    return points.length ? [`<polyline points="${points.join(" ")}" fill="none" stroke="#111" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`] : [];
+  });
+  if (!paths.length) return undefined;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="600" viewBox="0 0 1000 600"><rect width="1000" height="600" fill="white"/>${paths.join("")}</svg>`;
+  return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
 export interface RelayServer {
@@ -69,8 +90,8 @@ export function buildServer(config: RelayConfig): RelayServer {
     }));
   }
 
-  app.post("/v1/devices/:device/assets", async (request, reply) => {
-    const actor = client(request, "cards:write");
+  app.post("/v2/devices/:device/dashboard/assets", async (request, reply) => {
+    const actor = client(request, "dashboard:write");
     if (!actor) return deny(reply);
     let params: z.infer<typeof deviceParamSchema>;
     try { params = deviceParamSchema.parse(request.params); } catch (error) { return bad(reply, error); }
@@ -86,8 +107,8 @@ export function buildServer(config: RelayConfig): RelayServer {
     } catch (error) { return bad(reply, error); }
   });
 
-  app.post("/v1/devices/:device/cards", async (request, reply) => {
-    const actor = client(request, "cards:write");
+  app.post("/v2/devices/:device/dashboard/cards", async (request, reply) => {
+    const actor = client(request, "dashboard:write");
     if (!actor) return deny(reply);
     let params: z.infer<typeof deviceParamSchema>;
     try { params = deviceParamSchema.parse(request.params); } catch (error) { return bad(reply, error); }
@@ -101,15 +122,16 @@ export function buildServer(config: RelayConfig): RelayServer {
       const input = cardInputSchema.parse(request.body);
       if (input.asset_id && !store.assetPath(params.device, input.asset_id)) return reply.code(400).send({ error: "asset does not belong to device or has expired" });
       const row = store.createCard(params.device, input);
-      const response = { id: row.id, cursor: row.cursor };
+      const response = receipt(request, "dashboard.card.create", { id: row.id, cursor: row.cursor, delivery: "queued" });
       if (typeof idem === "string") store.saveIdempotentResponse(actor.id, idem, response);
+      store.audit(request.id, actor.id, "dashboard.card.create", params.device, "accepted", { card_id: row.id });
       changes.emit(params.device);
       return reply.code(201).send(response);
     } catch (error) { return bad(reply, error); }
   });
 
-  app.patch("/v1/devices/:device/cards/:card", async (request, reply) => {
-    if (!client(request, "cards:write")) return deny(reply);
+  app.patch("/v2/devices/:device/dashboard/cards/:card", async (request, reply) => {
+    if (!client(request, "dashboard:write")) return deny(reply);
     try {
       const params = cardParamSchema.parse(request.params);
       const patch = cardPatchSchema.parse(request.body);
@@ -120,14 +142,14 @@ export function buildServer(config: RelayConfig): RelayServer {
     } catch (error) { return bad(reply, error); }
   });
 
-  app.get("/v1/devices/:device/cards", async (request, reply) => {
-    if (!client(request, "cards:read")) return deny(reply);
+  app.get("/v2/devices/:device/dashboard/cards", async (request, reply) => {
+    if (!client(request, "dashboard:read")) return deny(reply);
     try { const { device } = deviceParamSchema.parse(request.params); return { cards: cardsWithDelivery(device) }; }
     catch (error) { return bad(reply, error); }
   });
 
-  app.get("/v1/devices/:device/cards/:card", async (request, reply) => {
-    if (!client(request, "cards:read")) return deny(reply);
+  app.get("/v2/devices/:device/dashboard/cards/:card", async (request, reply) => {
+    if (!client(request, "dashboard:read")) return deny(reply);
     try {
       const { device, card } = cardParamSchema.parse(request.params);
       const item = cardsWithDelivery(device).find((candidate) => candidate.id === card);
@@ -135,8 +157,8 @@ export function buildServer(config: RelayConfig): RelayServer {
     } catch (error) { return bad(reply, error); }
   });
 
-  app.delete("/v1/devices/:device/cards/:card", async (request, reply) => {
-    if (!client(request, "cards:clear")) return deny(reply);
+  app.delete("/v2/devices/:device/dashboard/cards/:card", async (request, reply) => {
+    if (!client(request, "dashboard:clear")) return deny(reply);
     try {
       const params = cardParamSchema.parse(request.params);
       if (!store.deleteCard(params.device, params.card)) return reply.code(404).send({ error: "card not found" });
@@ -145,8 +167,8 @@ export function buildServer(config: RelayConfig): RelayServer {
     } catch (error) { return bad(reply, error); }
   });
 
-  app.post("/v1/devices/:device/clear", async (request, reply) => {
-    if (!client(request, "cards:clear")) return deny(reply);
+  app.post("/v2/devices/:device/dashboard/clear", async (request, reply) => {
+    if (!client(request, "dashboard:clear")) return deny(reply);
     try {
       const { device } = deviceParamSchema.parse(request.params);
       const removed = store.clearCards(device);
@@ -155,7 +177,7 @@ export function buildServer(config: RelayConfig): RelayServer {
     } catch (error) { return bad(reply, error); }
   });
 
-  app.get("/v1/devices/:device/status", async (request, reply) => {
+  app.get("/v2/devices/:device/status", async (request, reply) => {
     if (!client(request, "status:read")) return deny(reply);
     try {
       const { device } = deviceParamSchema.parse(request.params);
@@ -164,38 +186,39 @@ export function buildServer(config: RelayConfig): RelayServer {
       const ui = store.getUiState(device);
       const cards = cardsWithDelivery(device);
       const visible = ui?.foreground && ui.visible_card_id ? cards.find((card) => card.id === ui.visible_card_id) : undefined;
-      return { ...status, application: ui?.foreground ? ui.application : null, foreground: ui?.foreground ?? false,
+      const lastSeenAt = Date.parse(status.last_seen_at ?? "");
+      const online = Number.isFinite(lastSeenAt) && Date.now() - lastSeenAt <= 90_000;
+      return { ...status, online, protocol_version: ui?.protocol_version ?? null,
+        application: ui?.foreground ? ui.application : null, foreground: ui?.foreground ?? false,
+        mode: ui?.mode ?? null,
         visible_card: visible ?? null, visible_index: ui?.visible_index ?? null, ambient_mode: ui?.ambient_mode ?? false,
         controls_visible: ui?.controls_visible ?? false, rendered_cursor: ui?.rendered_cursor ?? null,
+        history_index: ui?.history_index ?? null, history_count: ui?.history_count ?? 0,
+        scroll_offset: ui?.scroll_offset ?? 0, active_session_id: ui?.active_session_id ?? null,
+        active_message_id: ui?.active_message_id ?? null, last_interaction_at: ui?.last_interaction_at ?? null,
         last_action: ui?.last_action ?? "", last_result: ui?.last_result ?? "", ui_updated_at: ui?.updated_at ?? null };
     } catch (error) { return bad(reply, error); }
   });
 
-  app.get("/v1/devices/:device/tablet/status", async (request, reply) => {
-    if (!client(request, "status:read")) return deny(reply);
-    try { const { device } = deviceParamSchema.parse(request.params); return await tablet.status(device); }
-    catch (error) { return bad(reply, error); }
-  });
-
-  app.get("/v1/devices/:device/tablet/apps", async (request, reply) => {
+  app.get("/v2/devices/:device/apps", async (request, reply) => {
     if (!client(request, "device:apps")) return deny(reply);
     try { const { device } = deviceParamSchema.parse(request.params); return await tablet.apps(device); }
     catch (error) { return bad(reply, error); }
   });
 
-  app.post("/v1/devices/:device/tablet/launch", async (request, reply) => {
+  app.post("/v2/devices/:device/apps/launch", async (request, reply) => {
     if (!client(request, "device:control")) return deny(reply);
     try { const { device } = deviceParamSchema.parse(request.params); const { app_id } = tabletLaunchSchema.parse(request.body); return await tablet.launch(device, app_id); }
     catch (error) { return bad(reply, error); }
   });
 
-  app.post("/v1/devices/:device/tablet/return", async (request, reply) => {
+  app.post("/v2/devices/:device/exit", async (request, reply) => {
     if (!client(request, "device:control")) return deny(reply);
     try { const { device } = deviceParamSchema.parse(request.params); return await tablet.return(device); }
     catch (error) { return bad(reply, error); }
   });
 
-  app.get("/v1/devices/:device/tablet/screenshot", async (request, reply) => {
+  app.get("/v2/devices/:device/screenshot", async (request, reply) => {
     if (!client(request, "screen:read")) return deny(reply);
     try {
       const { device } = deviceParamSchema.parse(request.params);
@@ -205,8 +228,8 @@ export function buildServer(config: RelayConfig): RelayServer {
     catch (error) { return bad(reply, error); }
   });
 
-  app.post("/v1/devices/:device/commands", async (request, reply) => {
-    if (!client(request, "paperboard:control")) return deny(reply);
+  app.post("/v2/devices/:device/commands", async (request, reply) => {
+    if (!client(request, "device:control")) return deny(reply);
     try {
       const { device } = deviceParamSchema.parse(request.params); const input = paperboardCommandSchema.parse(request.body);
       const ui = store.getUiState(device);
@@ -216,43 +239,93 @@ export function buildServer(config: RelayConfig): RelayServer {
     } catch (error) { return bad(reply, error); }
   });
 
-  app.get("/v1/devices/:device/commands/:command", async (request, reply) => {
-    if (!client(request, "paperboard:control")) return deny(reply);
+  app.get("/v2/devices/:device/commands/:command", async (request, reply) => {
+    if (!client(request, "device:control")) return deny(reply);
     try { const { device, command } = commandParamSchema.parse(request.params); return store.getCommand(device, command) ?? reply.code(404).send({ error: "command not found" }); }
     catch (error) { return bad(reply, error); }
   });
 
-  app.post("/v1/devices/:device/canvas/sessions", async (request, reply) => {
-    if (!client(request, "canvas:write")) return deny(reply);
+  app.post("/v2/devices/:device/screen/sessions", async (request, reply) => {
+    if (!client(request, "screen:write")) return deny(reply);
     try { const { device } = deviceParamSchema.parse(request.params); const input = canvasSessionInputSchema.parse(request.body); const session = store.createCanvasSession(device, input.title); changes.emit(device); return reply.code(201).send(session); }
     catch (error) { return bad(reply, error); }
   });
-  app.get("/v1/devices/:device/canvas/sessions", async (request, reply) => {
-    if (!client(request, "canvas:read")) return deny(reply);
+  app.get("/v2/devices/:device/screen/sessions", async (request, reply) => {
+    if (!client(request, "screen:read")) return deny(reply);
     try { const { device } = deviceParamSchema.parse(request.params); return { sessions: store.listCanvasSessions(device) }; } catch (error) { return bad(reply, error); }
   });
-  app.get("/v1/devices/:device/canvas/sessions/:session", async (request, reply) => {
-    if (!client(request, "canvas:read")) return deny(reply);
+  app.get("/v2/devices/:device/screen/sessions/:session", async (request, reply) => {
+    if (!client(request, "screen:read")) return deny(reply);
     try { const { device, session } = sessionParamSchema.parse(request.params); const item = store.getCanvasSession(device, session); return item ? { ...item, messages: store.canvasMessages(device, session, config.publicBaseUrl) } : reply.code(404).send({ error: "session not found" }); } catch (error) { return bad(reply, error); }
   });
-  app.post("/v1/devices/:device/canvas/sessions/:session/messages", async (request, reply) => {
-    if (!client(request, "canvas:write")) return deny(reply);
-    try { const { device, session } = sessionParamSchema.parse(request.params); const input = canvasMessageInputSchema.parse(request.body); if (input.asset_id && !store.assetPath(device, input.asset_id)) return reply.code(400).send({ error: "asset does not belong to device or has expired" }); const message = store.createCanvasMessage(device, session, input); if (message) changes.emit(device); return message ? reply.code(201).send(message) : reply.code(404).send({ error: "open session not found" }); } catch (error) { return bad(reply, error); }
+  app.post("/v2/devices/:device/screen/sessions/:session/messages", async (request, reply) => {
+    const actor = client(request, "screen:write");
+    if (!actor) return deny(reply);
+    try {
+      const { device, session } = sessionParamSchema.parse(request.params);
+      const input = canvasMessageInputSchema.parse(request.body);
+      if (input.asset_id && !store.assetPath(device, input.asset_id)) return reply.code(400).send({ error: "asset does not belong to device or has expired" });
+      const message = store.createCanvasMessage(device, session, input);
+      if (!message) return reply.code(404).send({ error: "open session not found" });
+      let launch: Record<string, unknown> | undefined;
+      let command: Record<string, unknown> | undefined;
+      if (input.foreground) {
+        store.requestScreenPresentation(device, message.id);
+        try { launch = await tablet.launch(device, "paperboard"); }
+        catch { launch = { launched: false, status: "tablet-unavailable" }; }
+        command = store.createCommand(device, "show_screen", message.id) as unknown as Record<string, unknown>;
+      }
+      changes.emit(device);
+      store.audit(request.id, actor.id, "screen.message.present", device, "accepted", { session_id: session, message_id: message.id, foreground: input.foreground });
+      return reply.code(201).send(receipt(request, "screen.message.present", { ...message, delivery: "queued", foreground_requested: input.foreground, launch, command }));
+    } catch (error) { return bad(reply, error); }
   });
-  app.get("/v1/devices/:device/canvas/sessions/:session/events", async (request, reply) => {
-    if (!client(request, "canvas:read")) return deny(reply);
+
+  /* One authenticated long-poll drives the unified Dashboard/Screen app. */
+  app.get("/v2/device/:device/poll", async (request, reply) => {
+    const { device } = deviceParamSchema.parse(request.params);
+    if (!requireDevice(request, store, device)) return deny(reply);
+    const query = devicePollQuerySchema.parse(request.query);
+    const currentCursor = (): number => Number(store.status(device)?.cursor ?? 0) + store.canvasCursor(device);
+    let cursor = currentCursor();
+    if (cursor <= query.cursor && query.wait > 0) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(done, query.wait * 1000);
+        const changed = (): void => done();
+        function done(): void { clearTimeout(timer); changes.off(device, changed); resolve(); }
+        changes.once(device, changed);
+      });
+      cursor = currentCursor();
+    }
+    const session = store.latestOpenCanvasSession(device);
+    const messages = store.canvasHistory(device, config.publicBaseUrl);
+    store.heartbeat(device);
+    return {
+      protocol_version: 2,
+      cursor,
+      dashboard_cursor: Number(store.status(device)?.cursor ?? 0),
+      screen_cursor: store.canvasCursor(device),
+      cards: store.activeCards(device, config.publicBaseUrl),
+      screen: { session: session ? { ...session, messages } : null, messages },
+      presentation: { screen_message_id: store.screenPresentationTarget(device) },
+      commands: store.pendingCommands(device),
+      server_time: new Date().toISOString(),
+    };
+  });
+  app.get("/v2/devices/:device/screen/sessions/:session/events", async (request, reply) => {
+    if (!client(request, "screen:read")) return deny(reply);
     try { const { device, session } = sessionParamSchema.parse(request.params); const query = z.object({ after: z.coerce.number().int().min(0).default(0) }).parse(request.query); return { events: store.canvasEvents(device, session, query.after) }; } catch (error) { return bad(reply, error); }
   });
-  app.post("/v1/devices/:device/canvas/sessions/:session/events/:event/ack", async (request, reply) => {
-    if (!client(request, "canvas:write")) return deny(reply);
+  app.post("/v2/devices/:device/screen/sessions/:session/events/:event/ack", async (request, reply) => {
+    if (!client(request, "screen:write")) return deny(reply);
     try { const { device, session, event } = eventParamSchema.parse(request.params); return store.acknowledgeCanvasEvent(device, session, event) ? reply.code(204).send() : reply.code(404).send({ error: "event not found" }); } catch (error) { return bad(reply, error); }
   });
-  app.post("/v1/devices/:device/canvas/sessions/:session/close", async (request, reply) => {
-    if (!client(request, "canvas:write")) return deny(reply);
+  app.post("/v2/devices/:device/screen/sessions/:session/close", async (request, reply) => {
+    if (!client(request, "screen:write")) return deny(reply);
     try { const { device, session } = sessionParamSchema.parse(request.params); const closed = store.closeCanvasSession(device, session); if (closed) changes.emit(device); return closed ? { status: "closed" } : reply.code(404).send({ error: "session not found" }); } catch (error) { return bad(reply, error); }
   });
 
-  app.get("/v1/device/:device/poll", async (request, reply) => {
+  app.get("/v2/device/:device/dashboard/poll", async (request, reply) => {
     const params = deviceParamSchema.parse(request.params);
     if (!requireDevice(request, store, params.device)) return deny(reply);
     const query = devicePollQuerySchema.parse(request.query);
@@ -270,7 +343,7 @@ export function buildServer(config: RelayConfig): RelayServer {
     return { cursor: status.cursor, cards: store.activeCards(params.device, config.publicBaseUrl), commands: store.pendingCommands(params.device), server_time: new Date().toISOString() };
   });
 
-  app.get("/v1/device/:device/canvas/poll", async (request, reply) => {
+  app.get("/v2/device/:device/screen/poll", async (request, reply) => {
     const { device } = deviceParamSchema.parse(request.params); if (!requireDevice(request, store, device)) return deny(reply);
     const query = devicePollQuerySchema.parse(request.query);
     let cursor = store.canvasCursor(device);
@@ -288,22 +361,42 @@ export function buildServer(config: RelayConfig): RelayServer {
     return { cursor, session: session ? { ...session, messages } : null, messages, server_time: new Date().toISOString() };
   });
 
-  app.put("/v1/device/:device/ui-state", async (request, reply) => {
+  app.put("/v2/device/:device/ui-state", async (request, reply) => {
     const { device } = deviceParamSchema.parse(request.params); if (!requireDevice(request, store, device)) return deny(reply);
     try { store.putUiState(device, paperboardUiStateSchema.parse(request.body)); return reply.code(204).send(); } catch (error) { return bad(reply, error); }
   });
 
-  app.post("/v1/device/:device/commands/:command/result", async (request, reply) => {
+  app.post("/v2/device/:device/commands/:command/result", async (request, reply) => {
     const { device, command } = commandParamSchema.parse(request.params); if (!requireDevice(request, store, device)) return deny(reply);
     try { const result = commandResultSchema.parse({ ...(request.body as object), id: command }); return store.finishCommand(device, command, result.status, result.detail) ? reply.code(204).send() : reply.code(404).send({ error: "command not found" }); } catch (error) { return bad(reply, error); }
   });
 
-  app.post("/v1/device/:device/canvas/sessions/:session/events", async (request, reply) => {
+  app.post("/v2/device/:device/screen/sessions/:session/events", async (request, reply) => {
     const { device, session } = sessionParamSchema.parse(request.params); if (!requireDevice(request, store, device)) return deny(reply);
-    try { const event = store.createCanvasEvent(device, session, canvasEventInputSchema.parse(request.body)); return event ? reply.code(201).send(event) : reply.code(404).send({ error: "session or message not found" }); } catch (error) { return bad(reply, error); }
+    try {
+      const input = canvasEventInputSchema.parse(request.body);
+      const preview = await strokePreview(input.value);
+      if (preview && typeof input.value === "object" && input.value && "strokes" in input.value) {
+        const id = randomUUID().replaceAll("-", "");
+        const path = store.newAssetPath(id);
+        writeFileSync(path, preview, { flag: "wx", mode: 0o600 });
+        store.putAsset(device, id, path, createHash("sha256").update(preview).digest("hex"), new Date(Date.now() + 86_400_000).toISOString());
+        input.value.preview_asset_id = id;
+      }
+      const event = store.createCanvasEvent(device, session, input);
+      return event ? reply.code(201).send(event) : reply.code(404).send({ error: "session or message not found" });
+    } catch (error) { return bad(reply, error); }
   });
 
-  app.post("/v1/device/:device/ack", async (request, reply) => {
+  app.post("/v2/device/:device/reader", async (request, reply) => {
+    const { device } = deviceParamSchema.parse(request.params); if (!requireDevice(request, store, device)) return deny(reply);
+    try {
+      const { url } = z.object({ url: z.string().url().startsWith("https://").max(2048) }).parse(request.body);
+      return await fetchReaderPage(url);
+    } catch (error) { return bad(reply, error); }
+  });
+
+  app.post("/v2/device/:device/ack", async (request, reply) => {
     const params = deviceParamSchema.parse(request.params);
     if (!requireDevice(request, store, params.device)) return deny(reply);
     const body = z.object({ cursor: z.number().int().min(0) }).parse(request.body);
@@ -311,14 +404,14 @@ export function buildServer(config: RelayConfig): RelayServer {
     return reply.code(204).send();
   });
 
-  app.post("/v1/device/:device/heartbeat", async (request, reply) => {
+  app.post("/v2/device/:device/heartbeat", async (request, reply) => {
     const params = deviceParamSchema.parse(request.params);
     if (!requireDevice(request, store, params.device)) return deny(reply);
     store.heartbeat(params.device);
     return reply.code(204).send();
   });
 
-  app.post("/v1/device/:device/cards/:card/dismiss", async (request, reply) => {
+  app.post("/v2/device/:device/dashboard/cards/:card/dismiss", async (request, reply) => {
     const params = cardParamSchema.parse(request.params);
     if (!requireDevice(request, store, params.device)) return deny(reply);
     if (!store.deleteCard(params.device, params.card)) return reply.code(404).send({ error: "card not found" });
@@ -326,7 +419,7 @@ export function buildServer(config: RelayConfig): RelayServer {
     return reply.code(204).send();
   });
 
-  app.post("/v1/device/:device/cards/:card/pin", async (request, reply) => {
+  app.post("/v2/device/:device/dashboard/cards/:card/pin", async (request, reply) => {
     const params = cardParamSchema.parse(request.params);
     if (!requireDevice(request, store, params.device)) return deny(reply);
     const card = store.getCard(params.device, params.card);
@@ -336,7 +429,7 @@ export function buildServer(config: RelayConfig): RelayServer {
     return { id: updated.id, pinned: Boolean(updated.pinned), cursor: updated.cursor };
   });
 
-  app.get("/v1/device/:device/assets/:asset", async (request, reply) => {
+  app.get("/v2/device/:device/assets/:asset", async (request, reply) => {
     const params = assetParamSchema.parse(request.params);
     if (!requireDevice(request, store, params.device)) return deny(reply);
     const path = store.assetPath(params.device, params.asset);
@@ -367,6 +460,22 @@ export function buildServer(config: RelayConfig): RelayServer {
     const params = z.object({ client: z.string().regex(DEVICE_ID_PATTERN) }).parse(request.params);
     const body = z.object({ scopes: z.array(clientScopeSchema).min(1) }).parse(request.body);
     return store.updateClientScopes(params.client, [...new Set(body.scopes)]) ? { id: params.client, scopes: body.scopes } : reply.code(404).send({ error: "client not found" });
+  });
+
+  adminApp.get("/admin/clients", async (request, reply) => {
+    if (!requireAdmin(request, config.adminToken)) return deny(reply);
+    return { clients: store.listClients() };
+  });
+
+  adminApp.delete("/admin/clients/:client", async (request, reply) => {
+    if (!requireAdmin(request, config.adminToken)) return deny(reply);
+    const { client } = z.object({ client: z.string().regex(DEVICE_ID_PATTERN) }).parse(request.params);
+    return store.revokeClient(client) ? receipt(request, "admin.client.revoke", { id: client, revoked: true }) : reply.code(404).send({ error: "active client not found" });
+  });
+
+  adminApp.get("/admin/migrations", async (request, reply) => {
+    if (!requireAdmin(request, config.adminToken)) return deny(reply);
+    return { migrations: store.migrationStatus() };
   });
 
   adminApp.post("/admin/devices/:device/token", async (request, reply) => {

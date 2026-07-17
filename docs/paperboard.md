@@ -1,200 +1,96 @@
-# Paperboard
+# Paperboard v2
 
-Paperboard is a private, agent-friendly output queue for the Paper Pure. An
-agent can post a message, update a progress card, push a normalized image, or
-clear the queue. Nothing steals focus: delivery waits at the relay until the
-owner opens Paperboard from AppLoad.
+Paperboard is a private programmable display for the Paper Pure. One AppLoad
+package contains Dashboard, Screen, and Reader modes and shares one transport,
+history, chrome behavior, and exit path.
 
-```text
-CLI or MCP tool ──HTTPS/Tailscale──> relay ──long poll──> Paper Pure
-                                     │                    Paperboard QML
-TRMNL hosted or Terminus ────────────┘                    (foreground only)
-```
+## Behavior
 
-The tested path is WSL relay → Windows Tailscale Serve → tablet Tailscale
-userspace SOCKS proxy → Paperboard. The private DNS name and all credentials
-remain in ignored mode-0600 files.
+### Dashboard
 
-## What version 1 supports
+Dashboard displays queued message, progress, and image cards. Creating or
+updating a card is **queue-only**: it must not launch Paperboard or interrupt
+the stock notebook, KOReader, or another foreground app. Cards support expiry,
+pinning, priorities, and replace keys. Use a replace key for ongoing work so an
+agent updates one milestone rather than flooding the queue.
 
-- Message, progress, and image cards.
-- Urgent, pinned, normal, and ambient ordering.
-- Replace keys for one continuously updated status card.
-- Default five-minute TTL, maximum 24 hours, or explicit pinning.
-- Hidden-by-default chrome, horizontal card swipes, tap-only chrome controls,
-  and visible two-second feedback for every action. Movement never opens or
-  dismisses the chrome.
-- Previous/next, pin, dismiss, persistent ambient mode, refresh, and exit.
-- Authenticated long polling with cursor acknowledgements and offline catch-up.
-- TRMNL Hosted BYOD and self-hosted Terminus as optional ambient providers.
-- Client-scoped API, CLI, and MCP parity for cards, delivery status,
-  foreground navigation, and the separate interactive Paperboard Canvas
-  application.
-- No background display takeover. The app and relay polling client exist only
-  while Paperboard is in the foreground.
+### Screen
 
-The EXIT control calls AppLoad's `terminate()` operation, which kills the
-backend and immediately unloads every Paperboard frontend. It deliberately
-does not also emit the frontend `close` signal: mixing the two lifecycle paths
-can race the permanent unload and allow a resident frontend to relaunch the
-backend later.
+Screen is the explicit foreground surface. `screen present` launches the
+unified Paperboard package by default and displays structured content. It
+supports Markdown-like text, images, continuous one-finger scrolling, history
+navigation, choices, confirmations, checklists, single/multi-select controls,
+toggles, sliders, HTTPS links, and handwriting.
 
-The borderless top and bottom chrome do not consume content space. They begin hidden;
-swipe upward from the bottom or downward from the top to reveal them. A
-horizontal swipe moves between cards and leaves ambient mode. Ambient mode
-continues selecting the highest-ranked ambient frame as provider snapshots
-change until the owner exits it.
+Pen events preserve normalized vector points and pressure. The relay also
+creates a PNG preview for consumers that cannot interpret strokes. The newest
+100 displays are retained across sessions. Schema limits keep retained content
+well below the 100 MiB safety budget; uploaded assets expire separately.
 
-## Landscape orientation
+If Screen remains open for 45 minutes, Paperboard returns to Dashboard. This
+avoids leaving a transient agent response on the ambient device indefinitely.
 
-Paperboard deliberately uses the Paper Pure's native `1872x1404` landscape
-space. If AppLoad presents a portrait `1404x1872` application surface, the QML
-frontend rotates its complete landscape canvas by 90 degrees. If AppLoad
-already presents a landscape surface, no additional rotation is applied. This
-keeps Paperboard horizontal without changing the stock notebook application's
-orientation behavior.
+### Reader
 
-The relay normalizes uploaded and provider images to `1872x1404` with
-aspect-fit scaling. Landscape sources use the full canvas; portrait sources
-remain uncropped and receive side margins. Agent message and progress cards
-reflow natively in the wider layout.
+Reader is deliberately narrow. It accepts public HTTPS destinations only,
+rejects credentials and non-default ports, resolves DNS before connecting,
+blocks private/special addresses, validates every redirect, limits response
+size/time, and renders extracted text rather than arbitrary web scripts.
 
-## Build and deploy the tablet application
+## On-device controls
 
-Install the pinned official Paper Pure SDK outside the repository, then build:
+- Tap content once to show white-backed top and bottom controls.
+- Tap again to hide them.
+- Vertical drags scroll Screen content smoothly.
+- Horizontal drags navigate Screen history only after gesture direction is
+  unambiguous; they do not toggle the controls.
+- **Exit** returns to AppLoad/stock UI.
+
+Paperboard performs a full e-ink cleanup refresh when entering an app and after
+the configured partial-update threshold. This removes AppLoad ghosting while
+avoiding an expensive flash for every small interaction.
+
+## Delivery proof
+
+An API `201` receipt proves that content was accepted by the relay, not that it
+was rendered. Receipts contain an operation ID, request ID, device, resource,
+cursor, and timestamp. Before telling a user content is visible, compare:
+
+1. the resource cursor;
+2. the tablet heartbeat and last acknowledgement cursor;
+3. the visible card/session/message fields from device status.
+
+Use `dashboard_wait` or `paperboard dashboard wait` for this distinction.
+
+## Build, deploy, and rollback
 
 ```bash
-scripts/setup-paperboard-sdk.sh --dry-run
-scripts/setup-paperboard-sdk.sh
 scripts/build-paperboard.sh --clean
-scripts/deploy-paperboard.sh --dry-run
-scripts/deploy-paperboard.sh
+scripts/deploy-paperboard.sh --host remarkable-usb --dry-run
+scripts/deploy-paperboard.sh --host remarkable-usb
+scripts/paperboard-doctor.sh --host remarkable-usb
 ```
 
-The deployment is constrained to `imx93-tatsu`, `aarch64`, and reMarkable OS
-`3.27.x`. It installs only below the persistent home partition and retains the
-previous AppLoad bundle for rollback.
-
-## Connect it to a provisioned relay
-
-Provisioning writes two ignored files:
-
-```text
-secrets/tablets/<device>.conf       # copy to the tablet
-secrets/clients/<client>.env        # source on an authorized agent host
-```
-
-Install the tablet's redacted relay config without printing its token:
+Deployment requires an exact match from `config/compatibility.json`. It stages
+the bundle, retains three releases, records two previous deployments, activates
+atomically, and rolls back if the package health check fails. It restarts the
+Xovi-managed UI services by default so AppLoad loads the new QML resources,
+then waits and launches Paperboard. Use `--no-restart-xovi` only for a verified
+backend-only release.
 
 ```bash
-scripts/configure-paperboard.sh \
-  --relay-config secrets/tablets/paper-pure.conf --dry-run
-scripts/configure-paperboard.sh \
-  --relay-config secrets/tablets/paper-pure.conf
+scripts/rollback-paperboard.sh --host remarkable-usb --activate
 ```
 
-Install and start the pinned ARM64 Tailscale binaries in userspace mode:
+Always back up before deploying. If the tablet is locked, unlock it physically;
+the tooling never stores or injects a passcode.
 
-```bash
-scripts/install-paperboard-tailscale.sh --dry-run
-scripts/install-paperboard-tailscale.sh
-scripts/start-paperboard-tailscale.sh --hostname paper-pure
-```
+## Configuration
 
-The one-time Tailscale authentication URL is a legitimate human boundary. The
-service changes no kernel routes, creates no system service, and listens only
-on `127.0.0.1:1055` for SOCKS5. See [Tailscale](tailscale.md).
+Owner-specific relay URLs and tokens belong under ignored `secrets/` and are
+installed as mode-0600 configuration. Never commit or print them. Tablet
+configuration is created with `scripts/provision-paperboard-device.sh` and
+installed with `scripts/configure-paperboard.sh`.
 
-## Send output
-
-```bash
-set -a
-. secrets/clients/local-agent.env
-set +a
-
-pnpm paperboard show --device paper-pure \
-  --title "Build complete" --body "All checks passed." --priority urgent
-
-pnpm paperboard show --device paper-pure \
-  --title "Rendering" --progress 10 --replace-key current-build
-
-pnpm paperboard show --device paper-pure \
-  --title "Dashboard" --image ./dashboard.png --ttl 900
-
-pnpm paperboard status --device paper-pure
-pnpm paperboard clear --device paper-pure
-```
-
-The `show` response contains the card ID used by `update`. For agent-native
-integration, use [Agent tools](agent-tools.md).
-
-## E-ink behavior
-
-Snapshots are applied at most once every two seconds. Paperboard and Canvas
-request a full refresh 250 milliseconds after opening so the first rendered
-frame clears pixels left by AppLoad or the previous application. Image decode
-also requests an immediate full refresh. Both applications count relay updates,
-navigation, chrome, button feedback, and other partial changes, then request a
-cleanup refresh after seven weighted changes. A five-minute timer requests a
-cleanup refresh only when the foreground app has changed since its previous
-full refresh; a static screen does not flash on a schedule. There are no
-animations. One-second pushes are accepted by
-the relay but deliberately coalesced on screen; for chat or live status,
-two-second visual updates are the practical floor and one-minute updates are
-gentle on the display.
-
-These refreshes call xochitl's Ghostbuster service through the
-`xofm.libs.ghostbuster` QML module. A same-named application signal is not a
-refresh API: AppLoad only connects its `requestFullRefresh` signal for QTFB
-external applications.
-
-## Portable and desk modes
-
-- **Portable:** let the tablet sleep normally. Output queues at the relay and
-  catches up when Paperboard is opened. No wake daemon is installed.
-- **Desk session:** connect power, keep Paperboard open, and temporarily turn
-  off Auto sleep. Restore Auto sleep afterward. The relay long poll normally
-  delivers changes within a couple of seconds.
-
-Do not disable the passcode. Paperboard cannot unlock or bypass a locked
-tablet.
-
-## Launch policy
-
-Paperboard is deliberately manual-launch through AppLoad. Do not configure it
-to start on boot or when a card is posted: agent and provider output must queue
-without interrupting notebooks, reading, or the stock interface. EXIT uses
-AppLoad's permanent unload path, so later relay activity cannot relaunch the
-tablet client. Auto sleep is independent of this policy and may remain disabled
-during an owner-approved powered desk deployment.
-
-## Legacy single-image mode
-
-`scripts/configure-paperboard.sh --from-file FILE` remains supported for a
-single HTTPS PNG URL. Relay mode is recommended for authenticated cards,
-providers, agents, and safe queueing.
-
-## Remove or roll back
-
-```bash
-scripts/stop-paperboard-tailscale.sh
-scripts/configure-paperboard.sh --remove
-scripts/remove-paperboard.sh --dry-run
-scripts/remove-paperboard.sh
-```
-
-Use `--purge-data` only when local config, cached snapshots/assets, Tailscale
-state, and the previous deployment should also be removed. See the script's
-dry run before destructive cleanup.
-
-## Verified baseline
-
-The complete relay path, message/progress replacement, authenticated image
-delivery, foreground-only queueing, app reopen/catch-up, and fixed landscape
-rendering were exercised on Paper Pure OS `3.27.3.0`. Both a normalized
-Terminus image and a native agent message were visually verified across the
-horizontal canvas before returning to the stock UI. Hosted TRMNL requires an
-owner BYOD API key and was contract-tested rather than called with a real
-account. Terminus `0.65.0` was also exercised end to end from a private TrueNAS
-SCALE deployment: ambient image delivery, cursor acknowledgement, and a direct
-agent card were all rendered on the tablet. See [Providers](providers.md).
+Provider modes are native, TRMNL Hosted BYOD, and Terminus. Provider traffic is
+handled by the relay; credentials do not belong in QML or agent prompts.

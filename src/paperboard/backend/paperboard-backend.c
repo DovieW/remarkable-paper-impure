@@ -17,17 +17,13 @@
 #include <time.h>
 #include <unistd.h>
 
-#ifdef CANVAS_MODE
-#define CONFIG_PATH "/home/root/.config/paperboard/config"
-#define STATE_DIR "/home/root/.local/share/canvas"
-#else
 #define CONFIG_PATH "/home/root/.config/paperboard/config"
 #define STATE_DIR "/home/root/.local/share/paperboard"
-#endif
 #define ASSET_DIR STATE_DIR "/assets"
 #define CANDIDATE_PATH STATE_DIR "/candidate.png"
 #define LAST_GOOD_PATH STATE_DIR "/dashboard.png"
 #define SNAPSHOT_PATH STATE_DIR "/snapshot.json"
+#define UI_STATE_PATH STATE_DIR "/ui-state.json"
 #define MAX_CONFIG_SIZE 16384U
 #define MAX_IMAGE_SIZE (8U * 1024U * 1024U)
 #define MAX_JSON_SIZE (1024U * 1024U)
@@ -36,9 +32,9 @@
 
 enum {
     MSG_REFRESH = 1, MSG_ACCEPT = 2, MSG_REJECT = 3, MSG_DISMISS = 4, MSG_PIN = 5,
-    MSG_UI_STATE = 6, MSG_COMMAND_RESULT = 7, MSG_CANVAS_EVENT = 8,
+    MSG_UI_STATE = 6, MSG_COMMAND_RESULT = 7, MSG_CANVAS_EVENT = 8, MSG_READER_OPEN = 9,
     MSG_STATUS = 101, MSG_CANDIDATE = 102, MSG_ERROR = 103, MSG_LAST_GOOD = 104,
-    MSG_SNAPSHOT = 105, MSG_COMMAND = 106, MSG_ACTION_RESULT = 107,
+    MSG_SNAPSHOT = 105, MSG_COMMAND = 106, MSG_ACTION_RESULT = 107, MSG_READER = 108,
 };
 
 #define MSG_SYSTEM_TERMINATE UINT32_MAX
@@ -211,7 +207,7 @@ static void configure_curl(CURL *curl, const char *url, struct curl_slist *heade
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
     curl_easy_setopt(curl, CURLOPT_CAINFO, "/etc/ssl/certs/ca-certificates.crt");
     curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Paperboard/1.0");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Paperboard/2.0");
     curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_PROXY, config.proxy);
@@ -340,20 +336,17 @@ static void attach_assets(struct json_object *root) {
     }
 }
 
-#ifdef CANVAS_MODE
-static void attach_canvas_assets(struct json_object *root) {
-    struct json_object *session, *messages, *wrapper;
-    if (!json_object_object_get_ex(root, "session", &session) || json_object_is_type(session, json_type_null) ||
-        !json_object_object_get_ex(session, "messages", &messages) || !json_object_is_type(messages, json_type_array)) return;
+static void attach_screen_assets(struct json_object *root) {
+    struct json_object *screen, *messages, *wrapper;
+    if (!json_object_object_get_ex(root, "screen", &screen) || json_object_is_type(screen, json_type_null) ||
+        !json_object_object_get_ex(screen, "messages", &messages) || !json_object_is_type(messages, json_type_array)) return;
     wrapper = json_object_new_object();
     json_object_get(messages);
     json_object_object_add(wrapper, "cards", messages);
     attach_assets(wrapper);
     json_object_put(wrapper);
 }
-#endif
 
-#ifndef CANVAS_MODE
 static void cleanup_assets(struct json_object *root) {
     struct json_object *cards;
     struct dirent *entry;
@@ -376,7 +369,30 @@ static void cleanup_assets(struct json_object *root) {
     }
     closedir(directory);
 }
-#endif
+
+static void persist_ui_state(const char *json) {
+    char temporary[] = UI_STATE_PATH ".tmp";
+    int descriptor, ok; size_t length = strlen(json); ssize_t written;
+    if (length == 0 || length > 16384U) return;
+    unlink(temporary);
+    descriptor = open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+    if (descriptor < 0) return;
+    written = write(descriptor, json, length);
+    ok = written == (ssize_t)length && fsync(descriptor) == 0 && close(descriptor) == 0;
+    if (ok) { if (rename(temporary, UI_STATE_PATH) != 0) unlink(temporary); }
+    else { (void)close(descriptor); unlink(temporary); }
+}
+
+static void attach_saved_ui_state(struct json_object *root) {
+    struct stat metadata; FILE *file; char *contents; struct json_object *state;
+    if (stat(UI_STATE_PATH, &metadata) != 0 || metadata.st_size <= 0 || metadata.st_size > 16384) return;
+    file = fopen(UI_STATE_PATH, "rb"); if (file == NULL) return;
+    contents = malloc((size_t)metadata.st_size + 1); if (contents == NULL) { fclose(file); return; }
+    if (fread(contents, 1, (size_t)metadata.st_size, file) != (size_t)metadata.st_size) { free(contents); fclose(file); return; }
+    fclose(file); contents[metadata.st_size] = '\0'; state = json_tokener_parse(contents); free(contents);
+    if (state != NULL && json_object_is_type(state, json_type_object)) json_object_object_add(root, "ui_state", state);
+    else if (state != NULL) json_object_put(state);
+}
 
 static void persist_snapshot(const char *json) {
     char temporary[] = SNAPSHOT_PATH ".tmp";
@@ -403,30 +419,35 @@ static void send_cached_snapshot(void) {
     buffer.data[buffer.length] = '\0'; send_message(MSG_SNAPSHOT, buffer.data); free(buffer.data);
 }
 
-#ifndef CANVAS_MODE
 static void relay_ack(long long cursor) {
     char url[4600], body[80]; struct buffer response = { 0 };
-    snprintf(url, sizeof(url), "%s/v1/device/%s/ack", config.relay_url, config.device_id);
+    snprintf(url, sizeof(url), "%s/v2/device/%s/ack", config.relay_url, config.device_id);
     snprintf(body, sizeof(body), "{\"cursor\":%lld}", cursor);
     (void)http_json(url, body, &response, 10L); free(response.data);
 }
-#endif
 
 static int relay_poll_once(long long cursor) {
     char url[4600]; struct buffer response = { 0 }; struct json_object *root, *cursor_object, *commands;
     long timeout = config.poll_wait + 15;
-#ifdef CANVAS_MODE
-    snprintf(url, sizeof(url), "%s/v1/device/%s/canvas/poll?cursor=%lld&wait=%ld", config.relay_url, config.device_id, cursor, config.poll_wait);
-#else
-    snprintf(url, sizeof(url), "%s/v1/device/%s/poll?cursor=%lld&wait=%ld", config.relay_url, config.device_id, cursor, config.poll_wait);
-#endif
+    snprintf(url, sizeof(url), "%s/v2/device/%s/poll?cursor=%lld&wait=%ld", config.relay_url, config.device_id, cursor, config.poll_wait);
     if (http_json(url, NULL, &response, timeout) != 0) { free(response.data); return -1; }
     root = json_tokener_parse(response.data == NULL ? "" : response.data);
     free(response.data);
     if (root == NULL || !json_object_is_type(root, json_type_object) ||
         !json_object_object_get_ex(root, "cursor", &cursor_object)) { json_object_put(root); return -1; }
     relay_cursor = json_object_get_int64(cursor_object);
-#ifndef CANVAS_MODE
+    attach_assets(root);
+    attach_screen_assets(root);
+    cleanup_assets(root);
+    attach_saved_ui_state(root);
+    {
+        const char *serialized = json_object_to_json_string_ext(root, JSON_C_TO_STRING_PLAIN);
+        persist_snapshot(serialized);
+        send_message(MSG_SNAPSHOT, serialized);
+    }
+    /* A foreground command can target content introduced by this poll. Send
+     * the complete snapshot first so QML can resolve the target immediately,
+     * rather than racing a navigation command against stale history. */
     if (json_object_object_get_ex(root, "commands", &commands) && json_object_is_type(commands, json_type_array)) {
         size_t index, count = json_object_array_length(commands);
         for (index = 0; index < count; index++) {
@@ -434,23 +455,7 @@ static int relay_poll_once(long long cursor) {
             send_message(MSG_COMMAND, json_object_to_json_string_ext(command, JSON_C_TO_STRING_PLAIN));
         }
     }
-#else
-    (void)commands;
-#endif
-#ifdef CANVAS_MODE
-    attach_canvas_assets(root);
-#else
-    attach_assets(root);
-    cleanup_assets(root);
-#endif
-    {
-        const char *serialized = json_object_to_json_string_ext(root, JSON_C_TO_STRING_PLAIN);
-        persist_snapshot(serialized);
-        send_message(MSG_SNAPSHOT, serialized);
-    }
-#ifndef CANVAS_MODE
     relay_ack(relay_cursor);
-#endif
     json_object_put(root);
     return 0;
 }
@@ -473,7 +478,7 @@ static void *relay_loop(void *unused) {
 static void relay_action(const char *card_id, const char *action) {
     char url[4700]; struct buffer response = { 0 };
     if (!valid_id(card_id)) { send_message(MSG_ERROR, "Card identifier is invalid."); return; }
-    snprintf(url, sizeof(url), "%s/v1/device/%s/cards/%s/%s", config.relay_url, config.device_id, card_id, action);
+    snprintf(url, sizeof(url), "%s/v2/device/%s/dashboard/cards/%s/%s", config.relay_url, config.device_id, card_id, action);
     if (http_json(url, "{}", &response, 15L) != 0) send_message(MSG_ERROR, "Card action failed; queue retained.");
     else { send_message(MSG_ACTION_RESULT, action); force_refresh = 1; }
     free(response.data);
@@ -481,7 +486,8 @@ static void relay_action(const char *card_id, const char *action) {
 
 static void relay_ui_state(const char *body) {
     char url[4600]; struct buffer response = { 0 };
-    snprintf(url, sizeof(url), "%s/v1/device/%s/ui-state", config.relay_url, config.device_id);
+    persist_ui_state(body);
+    snprintf(url, sizeof(url), "%s/v2/device/%s/ui-state", config.relay_url, config.device_id);
     if (http_json_method(url, "PUT", body, &response, 10L) != 0)
         send_message(MSG_ERROR, "Could not report visible tablet state.");
     free(response.data);
@@ -492,7 +498,7 @@ static void relay_command_result(const char *body) {
     const char *id; char url[4700]; struct buffer response = { 0 };
     if (root == NULL || !json_object_object_get_ex(root, "id", &id_object) ||
         !valid_id(id = json_object_get_string(id_object))) { json_object_put(root); return; }
-    snprintf(url, sizeof(url), "%s/v1/device/%s/commands/%s/result", config.relay_url, config.device_id, id);
+    snprintf(url, sizeof(url), "%s/v2/device/%s/commands/%s/result", config.relay_url, config.device_id, id);
     (void)http_json(url, body, &response, 10L);
     free(response.data); json_object_put(root);
 }
@@ -503,11 +509,19 @@ static void relay_canvas_event(const char *body) {
     if (root == NULL || !json_object_object_get_ex(root, "session_id", &session_object) ||
         !valid_id(session = json_object_get_string(session_object))) { json_object_put(root); return; }
     json_object_object_del(root, "session_id");
-    snprintf(url, sizeof(url), "%s/v1/device/%s/canvas/sessions/%s/events", config.relay_url, config.device_id, session);
+    snprintf(url, sizeof(url), "%s/v2/device/%s/screen/sessions/%s/events", config.relay_url, config.device_id, session);
     if (http_json(url, json_object_to_json_string_ext(root, JSON_C_TO_STRING_PLAIN), &response, 10L) == 0)
         send_message(MSG_ACTION_RESULT, "Response sent");
     else send_message(MSG_ERROR, "Response could not be sent");
     free(response.data); json_object_put(root);
+}
+
+static void relay_reader_open(const char *body) {
+    char url[4600]; struct buffer response = { 0 };
+    snprintf(url, sizeof(url), "%s/v2/device/%s/reader", config.relay_url, config.device_id);
+    if (http_json(url, body, &response, 15L) == 0 && response.data != NULL) send_message(MSG_READER, response.data);
+    else send_message(MSG_ERROR, "Reader could not safely open this page");
+    free(response.data);
 }
 
 static void accept_candidate(void) {
@@ -554,6 +568,7 @@ int main(int argc, char **argv) {
         else if (header.type == MSG_UI_STATE && config.relay_mode) relay_ui_state(contents);
         else if (header.type == MSG_COMMAND_RESULT && config.relay_mode) relay_command_result(contents);
         else if (header.type == MSG_CANVAS_EVENT && config.relay_mode) relay_canvas_event(contents);
+        else if (header.type == MSG_READER_OPEN && config.relay_mode) relay_reader_open(contents);
     }
     stopping = 1; free(contents); close(socket_fd);
     if (!thread_started) curl_global_cleanup();

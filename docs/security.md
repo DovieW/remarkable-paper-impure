@@ -1,160 +1,57 @@
-# Security policy and operating rules
+# Security model
 
-Security is a primary project requirement, not a cleanup task after a
-customization works. This device permits root access, stores personal data,
-and may eventually connect to private services. Every change must therefore
-have a clear purpose, a narrow scope, and a recovery path.
+Developer Mode deliberately trades verified platform integrity for owner
+control. This project reduces avoidable risk; it cannot make a modified tablet
+equivalent to Enterprise Mode.
 
-## Security posture
+## Boundaries
 
-Developer mode deliberately weakens parts of the verified boot chain and
-enables root SSH access. We cannot make this equivalent to reMarkable's stock
-or enterprise-managed security posture. Our goal is to reduce the additional
-risk while preserving a useful personal development device.
+- Unlock and recovery remain physical human actions.
+- SSH starts over USB, pins the host key, and moves to Wi-Fi only when asked.
+- Key authentication is required; private keys and generated root passwords
+  never enter chat or Git.
+- Tablet identity, architecture, and exact OS are checked before every custom
+  bundle deployment.
+- User data is backed up and checksummed before software changes.
+- Dashboard delivery never foregrounds an app.
+- Screen foregrounding is explicit and auditable.
+- Device control is a fixed semantic allowlist, never arbitrary shell.
+- Remote input accepts bounded taps/swipes only and has an immediate kill
+  switch. It never accepts passcodes or text.
 
-This Paper Pure should be treated as a **personal experimental device**:
+## Relay
 
-- Do not store confidential employer or customer material on it.
-- Do not connect corporate OneDrive or other work accounts without explicit
-  organizational approval.
-- Do not place broadly privileged API tokens, SSH keys, or cloud credentials
-  on the tablet.
-- Prefer narrowly scoped, read-only credentials for dashboards and services.
+The public relay listener is private-tailnet HTTPS. The admin listener remains
+on host loopback. Tailscale Funnel is forbidden. Tokens are high entropy,
+hashed at rest where appropriate, scoped to `dashboard:*`, `screen:*`,
+`status:read`, and narrow `device:*` capabilities, and revocable through the
+admin control plane. Upstream provider credentials are authenticated-encrypted
+with the master key.
 
-## Paperboard threat boundary
+Source ignored environment files in a subshell. Never print, commit, or send
+device, client, admin, provider, Tailscale, or private hostname values.
 
-Paperboard is private-by-design but not a container for secrets. Cards may be
-visible to anyone holding the unlocked tablet and are stored temporarily in
-the relay database. Do not send passwords, recovery codes, private keys, or
-confidential work content as cards.
+## Content safety
 
-- The public relay listener is reachable only over private Tailscale HTTPS and
-  still requires a scoped client or device token.
-- The administration listener is separate and host-loopback-only.
-- Device tokens can poll/ack and act on only their matching device. Agent
-  tokens hold explicit card, status, Paperboard-control, and Canvas scopes
-  scopes. A client scope currently applies to every device on that relay, so
-  use a separate relay when devices have different trust owners.
-- Tokens are generated with high entropy and stored server-side only as
-  hashes. Provisioned plaintext copies are ignored mode-0600 files.
-- Provider credentials are AES-256-GCM encrypted with a separate mounted
-  master key and are never copied to the tablet.
-- Image uploads are size/pixel/type limited, decoded and normalized server-side,
-  and downloaded by the tablet only from its authenticated relay path.
-- Provider fetches reject redirects, URL credentials, private/special address
-  resolution, and plaintext HTTP. Terminus private HTTP is an explicit opt-in
-  for the isolated Docker network only.
-- Markdown allows no raw HTML or embedded images.
-- Delivery logs omit card content and expire after seven days.
+- Dashboard text rejects HTML and Markdown images.
+- Uploaded images are normalized before storage.
+- Reader fetches require public HTTPS and revalidate DNS/redirects to prevent
+  server-side request forgery.
+- Screenshots are returned ephemerally and are not retained by the relay.
+- Screen history is capped at 100 displays; event and asset retention is
+  bounded.
 
-Tailscale is transport isolation, not authorization. Use tailnet grants/ACLs
-to restrict the tablet to the relay and never enable Funnel. See
-[Tailscale topology](tailscale.md) and [Relay](relay.md).
+## Operational rules
 
-## Required practices
+1. Review upstream source and pin artifacts/checksums before root installation.
+2. Never use `curl | sh` as root.
+3. Do not modify boot/recovery partitions without explicit authorization and a
+   tested recovery route.
+4. Keep a passcode enabled during normal use. Temporarily disabling Auto sleep
+   is acceptable during supervised work; restore it afterward.
+5. Do not use this device for enterprise/confidential data without written
+   organizational approval.
+6. Run `scripts/release-check.sh` before a public push.
 
-### Access
-
-- Use a dedicated SSH key as documented in [SSH access](ssh.md).
-- Keep private keys and generated device passwords out of Git, scripts, shell
-  history, chat, and documentation.
-- Never expose SSH through router port forwarding or a public listener.
-- Keep Wi-Fi SSH limited to a trusted LAN and disable it when it is not needed:
-
-  ```bash
-  ssh remarkable rm-ssh-over-wlan off
-  ```
-
-- If remote access is added later, use an authenticated private overlay such
-  as Tailscale with restrictive ACLs. Do not assume that installing Tailscale
-  alone makes every service safe.
-- Remember the boundary: the generated local aliases refuse password login,
-  but the stock Paper Pure SSH server may still accept its generated root password.
-- Remote-control helpers must remain behind authenticated SSH and must not
-  store or inject the tablet passcode. Do not expose a separate control port.
-- Screenshot artifacts may contain private documents or authentication UI.
-  Keep them in ignored storage and delete them when no longer needed.
-  Server-side key-only authentication is a future hardening task that requires
-  separate review and recovery planning.
-
-### Software and scripts
-
-- Require explicit Paper Pure and installed-OS compatibility. A project that
-  supports reMarkable 1, reMarkable 2, Paper Pro, or Paper Pro Move is not
-  automatically compatible with Paper Pure.
-- Read installation and removal code before running it as root.
-- Do not use unreviewed `curl | sh`, `wget | sh`, or equivalent installers.
-- Prefer pinned releases, checksums, reproducible builds, and upstream source.
-- Give custom services the least privilege and narrowest network access they
-  need. Do not run as root merely for convenience.
-- Bind local-only services to loopback. Do not bind to `0.0.0.0` or `::`
-  without an explicit exposure review.
-
-### Device changes
-
-- Begin with read-only discovery and capture the exact device and OS version.
-- Back up important data and relevant configuration before each material
-  modification.
-- Preserve original files rather than overwriting them without a copy.
-- Every installed customization needs documented install, verification,
-  update, disable, and uninstall procedures.
-- Avoid writing to the boot chain, partition table, recovery components, or
-  protected root filesystem unless the task specifically requires it and a
-  tested recovery procedure exists.
-- Prefer files under the persistent home/data partition over modifications to
-  the operating-system partition.
-- Make one independently testable change at a time.
-- Prefer reusable, on-demand automation over repeated physical handoffs, but
-  preserve the human boundary for unlocking and recovery-mode actions. See
-  [Agent autonomy](agent-autonomy.md).
-
-### Updates
-
-- Record the reMarkable OS version for every compatibility result.
-- Before an OS update, review whether installed launchers, hooks, applications,
-  and services support the new version.
-- Back up custom configuration before updating.
-- Assume undocumented hooks and system-file changes may break or disappear
-  after an update.
-- Re-verify SSH exposure, service state, and application behavior after every
-  update.
-
-## Change checklist
-
-Before installing or modifying anything on the tablet, answer:
-
-1. Does the source explicitly support Paper Pure and our OS version?
-2. What files, services, partitions, credentials, and network ports change?
-3. Has the code or installer been reviewed?
-4. What data must be backed up first?
-5. How do we verify success without risking user documents?
-6. How do we disable and completely remove the change?
-7. What is the recovery path if the stock interface no longer starts?
-
-If these questions do not have satisfactory answers, stop and investigate
-before running the change.
-
-The prepared Paper Pure recovery path and its WSL-specific limitation are
-documented in [Paper Pure recovery](recovery.md).
-
-The stock BusyBox `wget` on the tested Paper Pure reports that TLS certificate
-validation is not implemented. Do not use it for sensitive HTTPS transfers.
-Paperboard links libcurl and explicitly enables peer and hostname verification
-against the device CA bundle.
-
-## If something looks wrong
-
-1. Disconnect the tablet from untrusted networks.
-2. Disable Wi-Fi SSH if access is still available.
-3. Preserve logs and record the last known change; do not make several new
-   changes while guessing.
-4. Remove or rotate exposed credentials from another trusted device.
-5. Prefer a documented rollback. Use official recovery only after preserving
-   any data that can still be recovered.
-
-## Official warning
-
-The [official developer-mode documentation](https://developer.remarkable.com/documentation/developer-mode)
-states that developer mode weakens device security and makes the user
-responsible for software modifications. Revisit it before boot- or
-filesystem-level work.
+If a credential may have appeared in output or history, revoke/rotate it first;
+removing the text from the current working tree is not sufficient.

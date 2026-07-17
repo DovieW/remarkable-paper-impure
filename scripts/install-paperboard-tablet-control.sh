@@ -11,10 +11,10 @@ Install the forced-command Paperboard control boundary on a Paper Pure.
 Usage:
   install-paperboard-tablet-control.sh --public-key FILE [--host ALIAS] [--dry-run]
 
-The key can enumerate AppLoad manifests, report state, and capture an ephemeral
-screenshot. Launch remains fail-closed until a reviewed local AppLoad launch
-helper is installed. The forced command never accepts shell text, paths, taps,
-or passcodes.
+The key can enumerate AppLoad manifests, report state, capture an ephemeral
+screenshot, and open the reviewed bounded tap/swipe protocol. Launch remains
+fail-closed until a reviewed local AppLoad launch helper is installed. The
+forced command never accepts shell text, paths, text input, or passcodes.
 EOF
 }
 while (($#)); do
@@ -96,8 +96,13 @@ case "$action" in
     printf '{"queued":true,"app":"%s"}\n' "$argument"
     ;;
   return)
-    pkill -f 'backend/entry /tmp/paperboard.sock' 2>/dev/null || true
-    pkill -f 'backend/entry /tmp/canvas.sock' 2>/dev/null || true
+    for socket in paperboard canvas; do
+      ps | awk -v target="backend/entry /tmp/$socket.sock" 'index($0, target) { print $1 }' \
+        | while IFS= read -r pid; do
+            case "$pid" in ''|*[!0-9]*) continue;; esac
+            kill "$pid" 2>/dev/null || true
+          done
+    done
     echo '{"returned":true}'
     ;;
   screenshot)
@@ -110,6 +115,11 @@ case "$action" in
     tries=0
     while test ! -s "$output"; do tries=$((tries + 1)); test "$tries" -lt 6 || exit 1; sleep 1; done
     cat "$output"
+    ;;
+  input)
+    test -z "$argument" || exit 2
+    test -x /home/root/.local/bin/paperctl-tap || { echo '{"error":"input helper unavailable"}'; exit 1; }
+    exec /home/root/.local/bin/paperctl-tap --serve
     ;;
   *) echo '{"error":"unsupported action"}'; exit 2 ;;
 esac

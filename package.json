@@ -13,7 +13,8 @@
     "paperboard": "pnpm --filter @paperboard/cli start --",
     "remote": "pnpm --filter @paperboard/remote start",
     "mcp": "pnpm --filter @paperboard/mcp start",
-    "home-assistant": "pnpm --filter @paperboard/home-assistant start"
+    "home-assistant": "pnpm --filter @paperboard/home-assistant start",
+    "release-check": "scripts/release-check.sh"
   },
   "devDependencies": {
     "esbuild": "0.28.1"

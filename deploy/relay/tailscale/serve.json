@@ -5,6 +5,7 @@
   "Web": {
     "${TS_CERT_DOMAIN}:443": {
       "Handlers": {
+        "/remote/": { "Proxy": "http://127.0.0.1:4174" },
         "/": { "Proxy": "http://127.0.0.1:8787" }
       }
     }

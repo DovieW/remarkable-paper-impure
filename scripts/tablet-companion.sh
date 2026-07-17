@@ -13,11 +13,12 @@ Read semantic state from an unlocked Paper Pure without exposing arbitrary SSH.
 Usage:
   tablet-companion.sh status
   tablet-companion.sh apps
+  tablet-companion.sh launch APP_ID
+  tablet-companion.sh return
   tablet-companion.sh screenshot [LOCAL_PNG]
 
-The companion is intentionally read-only in v1. Paperboard navigation uses its
-authenticated control API. This helper never unlocks, injects a passcode,
-accepts shell text, or exposes raw tap coordinates.
+The companion exposes only reviewed semantic operations. It never unlocks,
+injects a passcode, accepts shell text, or exposes raw tap coordinates.
 EOF
 }
 die() { printf '%s: %s\n' "$PROGRAM_NAME" "$*" >&2; exit 1; }
@@ -36,7 +37,6 @@ foreground=stock
 ps | grep -F 'backend/entry /tmp/paperboard.sock' | grep -v grep >/dev/null && foreground=paperboard
 ps | grep -F 'backend/entry /tmp/canvas.sock' | grep -v grep >/dev/null && foreground=canvas
 locked=unknown
-if busctl --system get-property com.remarkable.powerManager /com/remarkable/powerManager com.remarkable.powerManager State >/dev/null 2>&1; then locked=false; fi
 printf '{"platform":"%s","architecture":"%s","foreground":"%s","lock_state":"%s","screenshot":%s,"input_helper":%s}\n' \
   "$platform" "$architecture" "$foreground" "$locked" \
   "$(test -p /run/xovi-mb && echo true || echo false)" "$(test -x /home/root/.local/bin/paperctl-tap && echo true || echo false)"
@@ -56,6 +56,27 @@ for manifest in /home/root/xovi/exthome/appload/*/manifest.json; do
   printf '"%s"' "$id"
 done
 printf ']}\n'
+REMOTE
+    ;;
+  launch)
+    (($# == 1)) || die "launch requires one AppLoad ID"
+    app_id=$1
+    [[ $app_id =~ ^(external::)?[A-Za-z0-9][A-Za-z0-9._-]{0,126}$ ]] || die "invalid AppLoad ID"
+    ssh "${ssh_options[@]}" "$host" sh -s -- "$app_id" <<'REMOTE'
+set -eu
+app_id=$1
+SSH_ORIGINAL_COMMAND="paperboard-control launch $app_id"
+export SSH_ORIGINAL_COMMAND
+exec /home/root/.local/bin/paperboard-control
+REMOTE
+    ;;
+  return)
+    (($# == 0)) || die "return accepts no arguments"
+    ssh "${ssh_options[@]}" "$host" sh -s <<'REMOTE'
+set -eu
+SSH_ORIGINAL_COMMAND='paperboard-control return'
+export SSH_ORIGINAL_COMMAND
+exec /home/root/.local/bin/paperboard-control
 REMOTE
     ;;
   screenshot)

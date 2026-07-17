@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Paper Pure Remote</title>
-  <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="./app.css">
 </head>
 <body>
   <main class="workbench">
@@ -23,26 +23,22 @@
         <div class="touch-mark" id="touchMark"></div>
       </div>
       <aside class="rail">
-        <div class="rail-block safety">
-          <p class="label">INPUT</p>
-          <button id="armButton" class="arm" type="button"><span>○</span> Disarmed</button>
-          <p id="armHint">Unlock the tablet physically before arming.</p>
-        </div>
+        <div class="rail-block safety"><p class="label">INPUT</p><p id="inputState">Checking policy…</p><p>Controlled by the server kill switch. Unlock remains physical-only.</p></div>
         <div class="rail-block">
           <p class="label">VIEW</p>
           <button id="rotateButton" type="button">Rotate 90°</button>
           <button id="refreshButton" type="button">Refresh now</button>
           <label class="select-label" for="interval">Cadence</label>
           <select id="interval">
-            <option value="1500">Fast</option>
-            <option value="3000" selected>Balanced</option>
+            <option value="500">Fast</option>
+            <option value="1500" selected>Balanced</option>
             <option value="5000">Quiet</option>
           </select>
         </div>
         <div class="rail-block">
           <p class="label">APPS</p>
           <button data-control="paperboard" type="button">Paperboard</button>
-          <button data-control="canvas" type="button">Canvas</button>
+          <button data-control="screen" type="button">Screen</button>
           <button data-control="exit" class="exit" type="button">Exit custom app</button>
         </div>
       </aside>
@@ -54,17 +50,6 @@
       <span>Click = tap · drag = swipe</span>
     </footer>
   </main>
-  <dialog id="armDialog">
-    <form method="dialog">
-      <p class="eyebrow">AUTHENTICATION BOUNDARY</p>
-      <h2>Is the tablet already unlocked?</h2>
-      <p>The remote never enters or stores a passcode. Input will automatically disarm in five minutes.</p>
-      <div class="dialog-actions">
-        <button value="cancel">Cancel</button>
-        <button value="confirm" class="confirm">Yes, arm input</button>
-      </div>
-    </form>
-  </dialog>
-  <script src="/app.js" type="module"></script>
+  <script src="./app.js" type="module"></script>
 </body>
 </html>

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "product": "Paperboard",
+  "device": {
+    "platform": "imx93-tatsu",
+    "architecture": "aarch64",
+    "model": "reMarkable Paper Pure"
+  },
+  "approved_os": {
+    "3.27.3.0": {
+      "sdk": "tatsu-3.27.0.97",
+      "status": "tested",
+      "notes": "Observed and supervised Paper Pure baseline."
+    }
+  },
+  "components": {
+    "xovi": { "lifecycle": "tethered", "boot_integration": false },
+    "appload": { "required": true },
+    "rm-shot": { "required": true, "capabilities": ["full-frame", "crop"] },
+    "framebuffer-spy": { "required": true }
+  }
+}

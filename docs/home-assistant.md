@@ -1,33 +1,18 @@
 # Home Assistant adapter
 
-Canvas can act as a deliberately narrow Home Assistant control surface. The
-adapter runs on a trusted host, not on the tablet, and consumes Canvas events.
-It is disabled until the owner supplies a token file and explicit local
-allowlist.
+Paperboard Screen can provide a narrow Home Assistant control surface. The
+adapter runs on a trusted host, consumes Screen events, and maps allowlisted
+action IDs to predefined Home Assistant service calls.
 
-Copy `config/home-assistant.allowlist.example.json` to the ignored
-`config/home-assistant.allowlist.local` and map benign Canvas action IDs to one
-exact service and entity. Never commit a Home Assistant token.
+It never accepts arbitrary entity IDs or service names from a screen message.
+Configure mappings in ignored `config/home-assistant.allowlist.local`, then run
+the adapter for an already-created Screen session. Safe informational toggles
+may execute directly; locks, alarms, covers, and similarly consequential
+actions require a Screen confirmation value of `confirmed`.
 
-Risk policy:
-
-- Low: a small set of light, switch, fan, media-player, and input-boolean
-  operations can run when explicitly allowlisted.
-- Confirmation required: climate, covers, scenes, and vacuums require the
-  Canvas event value to be `confirmed`.
-- Denied: locks, alarms, cameras, scripts, automations, buttons, unknown
-  domains, and unknown services cannot run through this adapter.
-
-Start it only for an already-open Canvas session:
-
-```bash
-PAPERBOARD_DEVICE=paper-pure \
-CANVAS_SESSION=replace-with-session-id \
-HA_URL=https://home-assistant.example.invalid \
-HA_TOKEN_FILE=/private/path/home-assistant-token \
-HA_ALLOWLIST_FILE=config/home-assistant.allowlist.local \
-pnpm home-assistant
-```
-
-The relay client token still comes from `PAPERBOARD_TOKEN`. Keep the relay and
-Home Assistant endpoints private; do not enable Tailscale Funnel.
+Use environment variables with the `PAPERBOARD_SCREEN_*` names shown in the
+example configuration. Keep Home Assistant and Paperboard tokens in ignored,
+mode-0600 files or a secret manager. A dashboard is not automatically a Home
+Assistant web dashboard: interactive browser dashboards are too broad for the
+tablet security model. Paperboard instead renders explicit agent-controlled
+widgets and emits structured events.

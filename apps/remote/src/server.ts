@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, resolve } from "node:path";
@@ -7,8 +8,9 @@ import type { TabletController } from "./controller.js";
 
 const SCREEN_WIDTH = 1404;
 const SCREEN_HEIGHT = 1872;
-const ARM_DURATION_MS = 5 * 60 * 1000;
 const publicRoot = fileURLToPath(new URL("../public/", import.meta.url));
+
+export interface RemoteServerOptions { inputEnabled?: boolean; killSwitchPath?: string; basePath?: string; }
 
 function sendJson(response: ServerResponse, status: number, value: unknown): void {
   const body = Buffer.from(JSON.stringify(value));
@@ -41,9 +43,20 @@ function integer(value: unknown, minimum: number, maximum: number, name: string)
   return Number(value);
 }
 
-export function buildRemoteServer(controller: TabletController) {
+export function buildRemoteServer(controller: TabletController, options: RemoteServerOptions = {}) {
   const token = randomBytes(32).toString("base64url");
-  let armedUntil = 0;
+  const killSwitchPath = options.killSwitchPath ?? "/run/paperboard-remote.disabled";
+  const basePath = options.basePath?.replace(/\/$/, "") ?? "";
+  let inputWindowStarted = 0;
+  let inputWindowCount = 0;
+  const inputEnabled = (): boolean => options.inputEnabled === true && !existsSync(killSwitchPath);
+
+  function rateLimitInput(): void {
+    const now = Date.now();
+    if (now - inputWindowStarted >= 1000) { inputWindowStarted = now; inputWindowCount = 0; }
+    inputWindowCount++;
+    if (inputWindowCount > 8) throw new Error("input rate limit exceeded");
+  }
 
   const server = createServer(async (request, response) => {
     response.setHeader("content-security-policy", "default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'");
@@ -51,47 +64,34 @@ export function buildRemoteServer(controller: TabletController) {
     response.setHeader("x-frame-options", "DENY");
     response.setHeader("referrer-policy", "no-referrer");
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    const pathname = basePath && (url.pathname === basePath || url.pathname.startsWith(`${basePath}/`))
+      ? url.pathname.slice(basePath.length) || "/"
+      : url.pathname;
 
     try {
-      if (request.method === "GET" && url.pathname === "/api/session") {
-        sendJson(response, 200, { token, armed_until: armedUntil, screen: { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } });
+      if (request.method === "GET" && pathname === "/api/session") {
+        sendJson(response, 200, { token, input_enabled: inputEnabled(), kill_switch: existsSync(killSwitchPath), screen: { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } });
         return;
       }
 
-      if (url.pathname.startsWith("/api/") && request.headers["x-paper-remote-token"] !== token) {
+      if (pathname.startsWith("/api/") && request.headers["x-paper-remote-token"] !== token) {
         sendJson(response, 403, { error: "invalid local session token" });
         return;
       }
 
-      if (request.method === "GET" && url.pathname === "/api/status") {
-        sendJson(response, 200, { ...(await controller.status()), armed_until: armedUntil });
+      if (request.method === "GET" && pathname === "/api/status") {
+        sendJson(response, 200, { ...(await controller.status()), input_enabled: inputEnabled(), kill_switch: existsSync(killSwitchPath) });
         return;
       }
-      if (request.method === "GET" && url.pathname === "/api/frame") {
+      if (request.method === "GET" && pathname === "/api/frame") {
         const frame = await controller.capture();
         response.writeHead(200, { "content-type": "image/png", "content-length": frame.length, "cache-control": "no-store, max-age=0" });
         response.end(frame);
         return;
       }
-      if (request.method === "POST" && url.pathname === "/api/arm") {
-        const body = await readJson(request);
-        if (body.confirmed_unlocked !== true) throw new Error("confirm that the tablet is already unlocked");
-        armedUntil = Date.now() + ARM_DURATION_MS;
-        sendJson(response, 200, { armed_until: armedUntil });
-        return;
-      }
-      if (request.method === "POST" && url.pathname === "/api/disarm") {
-        await readJson(request);
-        armedUntil = 0;
-        sendJson(response, 200, { armed_until: armedUntil });
-        return;
-      }
-      if (request.method === "POST" && url.pathname === "/api/input") {
-        if (Date.now() >= armedUntil) {
-          armedUntil = 0;
-          sendJson(response, 423, { error: "input is disarmed; unlock the tablet physically and arm it again" });
-          return;
-        }
+      if (request.method === "POST" && pathname === "/api/input") {
+        if (!inputEnabled()) return sendJson(response, 423, { error: "remote input is disabled by configuration or kill switch" });
+        rateLimitInput();
         const body = await readJson(request);
         if (body.action === "tap") {
           await controller.tap(integer(body.x, 0, SCREEN_WIDTH - 1, "x"), integer(body.y, 0, SCREEN_HEIGHT - 1, "y"));
@@ -104,20 +104,19 @@ export function buildRemoteServer(controller: TabletController) {
         } else {
           throw new Error("unsupported input action");
         }
-        sendJson(response, 200, { accepted: true, armed_until: armedUntil });
+        sendJson(response, 200, { accepted: true, request_id: randomBytes(12).toString("hex"), input_enabled: true, completed_at: new Date().toISOString() });
         return;
       }
-      if (request.method === "POST" && url.pathname === "/api/control") {
+      if (request.method === "POST" && pathname === "/api/control") {
         const body = await readJson(request);
-        if (body.action !== "paperboard" && body.action !== "canvas" && body.action !== "exit") throw new Error("unsupported control action");
+        if (body.action !== "paperboard" && body.action !== "screen" && body.action !== "exit") throw new Error("unsupported control action");
         const result = await controller.control(body.action);
-        if (body.action === "exit") armedUntil = 0;
-        sendJson(response, 200, { result, armed_until: armedUntil });
+        sendJson(response, 200, { result, input_enabled: inputEnabled() });
         return;
       }
 
-      if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/app.css" || url.pathname === "/app.js")) {
-        const name = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
+      if (request.method === "GET" && (pathname === "/" || pathname === "/app.css" || pathname === "/app.js")) {
+        const name = pathname === "/" ? "index.html" : pathname.slice(1);
         const path = resolve(publicRoot, name);
         const body = await readFile(path);
         const types: Record<string, string> = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8" };

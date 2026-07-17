@@ -3,7 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { extname } from "node:path";
 import { parseArgs } from "node:util";
 import { PaperboardAdminClient, PaperboardClient } from "@paperboard/client";
-import { canvasMessageInputSchema, cardInputSchema, cardPatchSchema, providerSchema } from "@paperboard/core";
+import { screenMessageInputSchema, cardInputSchema, cardPatchSchema, clientScopeSchema, providerSchema } from "@paperboard/core";
 
 const argumentsFromShell = process.argv.slice(2);
 if (argumentsFromShell[0] === "--") argumentsFromShell.shift();
@@ -36,8 +36,15 @@ const common = {
 };
 
 async function main(): Promise<void> {
-  if (command === "show") {
-    const { values } = parseArgs({ args: rest, options: common, strict: true });
+  if (command === "dashboard" && rest[0] === "asset" && rest[1] === "upload") {
+    const { values } = parseArgs({ args: rest.slice(2), options: { device: { type: "string" }, path: { type: "string" } }, strict: true });
+    const path = required(values.path, "--path");
+    const extension = extname(path).toLowerCase();
+    const contentType = extension === ".jpg" || extension === ".jpeg" ? "image/jpeg" : extension === ".bmp" ? "image/bmp" : "image/png";
+    output(await client().uploadAsset(required(values.device, "--device"), await readFile(path), contentType)); return;
+  }
+  if (command === "dashboard" && rest[0] === "show") {
+    const { values } = parseArgs({ args: rest.slice(1), options: common, strict: true });
     const device = required(values.device, "--device");
     let assetId: string | undefined;
     if (values.image) {
@@ -49,29 +56,32 @@ async function main(): Promise<void> {
     output(await client().show(device, card, crypto.randomUUID()));
     return;
   }
-  if (command === "update") {
-    const { values } = parseArgs({ args: rest, options: { device: { type: "string" }, card: { type: "string" }, title: { type: "string" }, body: { type: "string" }, progress: { type: "string" }, priority: { type: "string" }, ttl: { type: "string" }, pin: { type: "boolean" } }, strict: true });
+  if (command === "dashboard" && rest[0] === "update") {
+    const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, card: { type: "string" }, title: { type: "string" }, body: { type: "string" }, progress: { type: "string" }, priority: { type: "string" }, ttl: { type: "string" }, pin: { type: "boolean" } }, strict: true });
     const patch = cardPatchSchema.parse({ title: values.title, body: values.body, progress: values.progress !== undefined ? Number(values.progress) : undefined, priority: values.priority, ttl_seconds: values.ttl ? Number(values.ttl) : undefined, pinned: values.pin });
     output(await client().update(required(values.device, "--device"), required(values.card, "--card"), patch)); return;
   }
-  if (command === "list") { const { values } = parseArgs({ args: rest, options: { device: { type: "string" } } }); output(await client().list(required(values.device, "--device"))); return; }
-  if (command === "get") { const { values } = parseArgs({ args: rest, options: { device: { type: "string" }, card: { type: "string" } } }); output(await client().get(required(values.device, "--device"), required(values.card, "--card"))); return; }
-  if (command === "delete") { const { values } = parseArgs({ args: rest, options: { device: { type: "string" }, card: { type: "string" } } }); await client().delete(required(values.device, "--device"), required(values.card, "--card")); output({ deleted: values.card }); return; }
-  if (command === "clear") { const { values } = parseArgs({ args: rest, options: { device: { type: "string" } } }); output(await client().clear(required(values.device, "--device"))); return; }
-  if (command === "status") { const { values } = parseArgs({ args: rest, options: { device: { type: "string" } } }); output(await client().status(required(values.device, "--device"))); return; }
-  if (command === "tablet" && rest[0] === "status") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" } } }); output(await client().tabletStatus(required(values.device, "--device"))); return; }
-  if (command === "tablet" && rest[0] === "apps") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" } } }); output(await client().tabletApps(required(values.device, "--device"))); return; }
-  if (command === "tablet" && rest[0] === "launch") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, app: { type: "string" } } }); output(await client().tabletLaunch(required(values.device, "--device"), required(values.app, "--app"))); return; }
-  if (command === "tablet" && rest[0] === "return") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" } } }); output(await client().tabletReturn(required(values.device, "--device"))); return; }
-  if (command === "tablet" && rest[0] === "screenshot") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, output: { type: "string" } } }); const path = required(values.output, "--output"); await writeFile(path, await client().tabletScreenshot(required(values.device, "--device")), { mode: 0o600 }); output({ path }); return; }
-  if (command === "wait") { const { values } = parseArgs({ args: rest, options: { device: { type: "string" }, card: { type: "string" }, until: { type: "string" }, timeout: { type: "string" } } }); const until = values.until ?? "acknowledged"; if (until !== "acknowledged" && until !== "visible") throw new Error("--until must be acknowledged or visible"); output(await waitFor(required(values.device, "--device"), until, values.card, Number(values.timeout ?? 30))); return; }
-  if (command === "control") { const { values } = parseArgs({ args: rest, options: { device: { type: "string" }, action: { type: "string" }, wait: { type: "boolean" } } }); const created = await client().command(required(values.device, "--device"), required(values.action, "--action") as Parameters<PaperboardClient["command"]>[1]); if (!values.wait) { output(created); return; } const id = required(String(created.id ?? ""), "command id"); for (let attempt = 0; attempt < 20; attempt++) { const state = await client().commandStatus(values.device!, id); if (["completed", "failed", "expired"].includes(String(state.status))) { output(state); return; } await pause(250); } throw new Error("command did not complete"); }
-  if (command === "device" && rest[0] === "create") { const { values } = parseArgs({ args: rest.slice(1), options: { id: { type: "string" } } }); output(await admin().createDevice(required(values.id, "--id"))); return; }
-  if (command === "client" && rest[0] === "create") { const { values } = parseArgs({ args: rest.slice(1), options: { id: { type: "string" }, scopes: { type: "string", multiple: true } } }); output(await admin().createClient(required(values.id, "--id"), values.scopes ?? ["cards:read", "cards:write", "cards:clear", "status:read", "paperboard:control", "canvas:read", "canvas:write", "device:apps", "device:control", "screen:read"])); return; }
-  if (command === "client" && rest[0] === "scopes") { const { values } = parseArgs({ args: rest.slice(1), options: { id: { type: "string" }, scope: { type: "string", multiple: true } } }); output(await admin().updateClientScopes(required(values.id, "--id"), (values.scope ?? []) as Parameters<PaperboardAdminClient["updateClientScopes"]>[1])); return; }
-  if (command === "token" && rest[0] === "rotate") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" } } }); output(await admin().rotateDevice(required(values.device, "--device"))); return; }
-  if (command === "provider" && rest[0] === "set") {
-    const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, kind: { type: "string" }, "base-url": { type: "string" }, "upstream-device": { type: "string" }, "access-token": { type: "string" }, "access-token-file": { type: "string" }, "allow-private-http": { type: "boolean" } } });
+  if (command === "dashboard" && rest[0] === "list") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" } } }); output(await client().list(required(values.device, "--device"))); return; }
+  if (command === "dashboard" && rest[0] === "get") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, card: { type: "string" } } }); output(await client().get(required(values.device, "--device"), required(values.card, "--card"))); return; }
+  if (command === "dashboard" && rest[0] === "delete") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, card: { type: "string" } } }); await client().delete(required(values.device, "--device"), required(values.card, "--card")); output({ deleted: values.card }); return; }
+  if (command === "dashboard" && rest[0] === "clear") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" } } }); output(await client().clear(required(values.device, "--device"))); return; }
+  if (command === "dashboard" && rest[0] === "wait") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, card: { type: "string" }, until: { type: "string" }, timeout: { type: "string" } } }); const until = values.until ?? "acknowledged"; if (until !== "acknowledged" && until !== "visible") throw new Error("--until must be acknowledged or visible"); output(await waitFor(required(values.device, "--device"), until, values.card, Number(values.timeout ?? 30))); return; }
+  if (command === "device" && rest[0] === "status") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" } } }); output(await client().deviceStatus(required(values.device, "--device"))); return; }
+  if (command === "device" && rest[0] === "apps") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" } } }); output(await client().deviceApps(required(values.device, "--device"))); return; }
+  if (command === "device" && rest[0] === "launch") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, app: { type: "string" } } }); output(await client().deviceLaunch(required(values.device, "--device"), required(values.app, "--app"))); return; }
+  if (command === "device" && rest[0] === "exit") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" } } }); output(await client().deviceExit(required(values.device, "--device"))); return; }
+  if (command === "device" && rest[0] === "screenshot") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, output: { type: "string" } } }); const path = required(values.output, "--output"); await writeFile(path, await client().deviceScreenshot(required(values.device, "--device")), { mode: 0o600 }); output({ path }); return; }
+  if (command === "device" && rest[0] === "control") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, action: { type: "string" }, wait: { type: "boolean" } } }); const created = await client().command(required(values.device, "--device"), required(values.action, "--action") as Parameters<PaperboardClient["command"]>[1]); if (!values.wait) { output(created); return; } const id = required(String(created.id ?? ""), "command id"); for (let attempt = 0; attempt < 20; attempt++) { const state = await client().commandStatus(values.device!, id); if (["completed", "failed", "expired"].includes(String(state.status))) { output(state); return; } await pause(250); } throw new Error("command did not complete"); }
+  if (command === "device" && rest[0] === "command-status") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, command: { type: "string" } } }); output(await client().commandStatus(required(values.device, "--device"), required(values.command, "--command"))); return; }
+  if (command === "admin" && rest[0] === "device" && rest[1] === "create") { const { values } = parseArgs({ args: rest.slice(2), options: { id: { type: "string" } } }); output(await admin().createDevice(required(values.id, "--id"))); return; }
+  if (command === "admin" && rest[0] === "client" && rest[1] === "create") { const { values } = parseArgs({ args: rest.slice(2), options: { id: { type: "string" }, scope: { type: "string", multiple: true } } }); const scopes = values.scope ?? clientScopeSchema.options; output(await admin().createClient(required(values.id, "--id"), scopes)); return; }
+  if (command === "admin" && rest[0] === "client" && rest[1] === "list") { output(await admin().listClients()); return; }
+  if (command === "admin" && rest[0] === "client" && rest[1] === "revoke") { const { values } = parseArgs({ args: rest.slice(2), options: { id: { type: "string" } } }); output(await admin().revokeClient(required(values.id, "--id"))); return; }
+  if (command === "admin" && rest[0] === "migrations") { output(await admin().migrations()); return; }
+  if (command === "admin" && rest[0] === "client" && rest[1] === "scopes") { const { values } = parseArgs({ args: rest.slice(2), options: { id: { type: "string" }, scope: { type: "string", multiple: true } } }); output(await admin().updateClientScopes(required(values.id, "--id"), (values.scope ?? []) as Parameters<PaperboardAdminClient["updateClientScopes"]>[1])); return; }
+  if (command === "admin" && rest[0] === "device" && rest[1] === "rotate-token") { const { values } = parseArgs({ args: rest.slice(2), options: { device: { type: "string" } } }); output(await admin().rotateDevice(required(values.device, "--device"))); return; }
+  if (command === "admin" && rest[0] === "provider" && rest[1] === "set") {
+    const { values } = parseArgs({ args: rest.slice(2), options: { device: { type: "string" }, kind: { type: "string" }, "base-url": { type: "string" }, "upstream-device": { type: "string" }, "access-token": { type: "string" }, "access-token-file": { type: "string" }, "allow-private-http": { type: "boolean" } } });
     if (values["access-token"] && values["access-token-file"]) throw new Error("use only one of --access-token or --access-token-file");
     const accessToken = values["access-token-file"]
       ? (await readFile(values["access-token-file"], "utf8")).trim()
@@ -79,14 +89,14 @@ async function main(): Promise<void> {
     const provider = providerSchema.parse(values.kind === "none" ? { kind: "none" } : { kind: values.kind, base_url: values["base-url"], device_id: values["upstream-device"], access_token: accessToken, allow_private_http: values["allow-private-http"] ?? false });
     output(await admin().setProvider(required(values.device, "--device"), provider)); return;
   }
-  if (command === "canvas" && rest[0] === "start") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, title: { type: "string" } } }); output(await client().createCanvasSession(required(values.device, "--device"), required(values.title, "--title"))); return; }
-  if (command === "canvas" && rest[0] === "list") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" } } }); output(await client().listCanvasSessions(required(values.device, "--device"))); return; }
-  if (command === "canvas" && rest[0] === "status") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, session: { type: "string" } } }); output(await client().getCanvasSession(required(values.device, "--device"), required(values.session, "--session"))); return; }
-  if (command === "canvas" && rest[0] === "send") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, session: { type: "string" }, title: { type: "string" }, body: { type: "string" }, actions: { type: "string" }, "replace-key": { type: "string" } } }); const actions = values.actions ? JSON.parse(values.actions) : []; output(await client().sendCanvasMessage(required(values.device, "--device"), required(values.session, "--session"), canvasMessageInputSchema.parse({ title: required(values.title, "--title"), body: values.body ?? "", actions, replace_key: values["replace-key"] }))); return; }
-  if (command === "canvas" && rest[0] === "events") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, session: { type: "string" }, after: { type: "string" } } }); output(await client().canvasEvents(required(values.device, "--device"), required(values.session, "--session"), Number(values.after ?? 0))); return; }
-  if (command === "canvas" && rest[0] === "ack") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, session: { type: "string" }, event: { type: "string" } } }); await client().acknowledgeCanvasEvent(required(values.device, "--device"), required(values.session, "--session"), required(values.event, "--event")); output({ acknowledged: values.event }); return; }
-  if (command === "canvas" && rest[0] === "close") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, session: { type: "string" } } }); output(await client().closeCanvasSession(required(values.device, "--device"), required(values.session, "--session"))); return; }
-  process.stderr.write("Usage: paperboard <show|update|list|get|delete|clear|status|wait|control|canvas|tablet|device create|client create|client scopes|token rotate|provider set> [options]\n");
+  if (command === "screen" && rest[0] === "start") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, title: { type: "string" } } }); output(await client().createScreenSession(required(values.device, "--device"), required(values.title, "--title"))); return; }
+  if (command === "screen" && rest[0] === "list") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" } } }); output(await client().listScreenSessions(required(values.device, "--device"))); return; }
+  if (command === "screen" && rest[0] === "status") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, session: { type: "string" } } }); output(await client().getScreenSession(required(values.device, "--device"), required(values.session, "--session"))); return; }
+  if (command === "screen" && rest[0] === "present") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, session: { type: "string" }, title: { type: "string" }, body: { type: "string" }, actions: { type: "string" }, "replace-key": { type: "string" }, foreground: { type: "boolean" } } }); const actions = values.actions ? JSON.parse(values.actions) : []; output(await client().presentScreen(required(values.device, "--device"), required(values.session, "--session"), screenMessageInputSchema.parse({ title: required(values.title, "--title"), body: values.body ?? "", actions, replace_key: values["replace-key"], foreground: values.foreground ?? true }))); return; }
+  if (command === "screen" && rest[0] === "events") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, session: { type: "string" }, after: { type: "string" } } }); output(await client().screenEvents(required(values.device, "--device"), required(values.session, "--session"), Number(values.after ?? 0))); return; }
+  if (command === "screen" && rest[0] === "ack") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, session: { type: "string" }, event: { type: "string" } } }); await client().acknowledgeScreenEvent(required(values.device, "--device"), required(values.session, "--session"), required(values.event, "--event")); output({ acknowledged: values.event }); return; }
+  if (command === "screen" && rest[0] === "close") { const { values } = parseArgs({ args: rest.slice(1), options: { device: { type: "string" }, session: { type: "string" } } }); output(await client().closeScreenSession(required(values.device, "--device"), required(values.session, "--session"))); return; }
+  process.stderr.write("Usage: paperboard <dashboard|screen|device|admin> <operation> [options]\n");
   process.exitCode = 2;
 }
 

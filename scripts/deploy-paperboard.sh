@@ -9,13 +9,18 @@ readonly REPOSITORY_ROOT
 host="${REMARKABLE_HOST:-remarkable-usb}"
 bundle_directory="${PAPERBOARD_BUILD_DIR:-$REPOSITORY_ROOT/build/paperboard-tatsu}"
 dry_run=false
-restart_xovi=false
+restart_xovi=true
+activate=true
+compatibility_manifest="$REPOSITORY_ROOT/config/compatibility.json"
 
 usage() {
   cat <<'EOF'
 Deploy a built Paperboard QML bundle to AppLoad on Paper Pure.
 
-Usage: deploy-paperboard.sh [--host HOST] [--bundle DIRECTORY] [--restart-xovi] [--dry-run]
+Usage: deploy-paperboard.sh [--host HOST] [--bundle DIRECTORY] [--no-restart-xovi] [--no-activate] [--dry-run]
+
+The managed Xovi UI services restart by default so AppLoad cannot retain an
+older QML frontend. Use --no-restart-xovi only for a backend-only release.
 EOF
 }
 
@@ -44,6 +49,14 @@ while (($#)); do
       restart_xovi=true
       shift
       ;;
+    --no-restart-xovi)
+      restart_xovi=false
+      shift
+      ;;
+    --no-activate)
+      activate=false
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -60,6 +73,7 @@ backend="$bundle_directory/backend/entry"
 [[ -f "$manifest" ]] || die "AppLoad manifest not found: $manifest"
 [[ -s "$resources" ]] || die "AppLoad resource bundle not found: $resources"
 [[ -x "$backend" ]] || die "Paperboard backend not found or not executable: $backend"
+[[ -f "$compatibility_manifest" ]] || die "compatibility manifest not found: $compatibility_manifest"
 
 for command_name in ssh scp; do
   command -v "$command_name" >/dev/null \
@@ -73,10 +87,14 @@ IFS='|' read -r device_hostname architecture image_version <<< "$identity"
 
 [[ "$device_hostname" == imx93-tatsu ]] || die "unexpected device platform: $device_hostname"
 [[ "$architecture" == aarch64 ]] || die "unexpected architecture: $architecture"
-[[ "$image_version" == 3.27.* ]] || die "Paperboard spike is currently constrained to OS 3.27.x, found $image_version"
+node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if (!data.approved_os[process.argv[2]]) process.exit(1)' \
+  "$compatibility_manifest" "$image_version" || die "OS $image_version is not approved in config/compatibility.json"
+
+release_id="$(sha256sum "$manifest" "$resources" "$backend" | sha256sum | cut -c1-16)"
 
 printf 'Target: %s (%s, OS %s)\n' "$device_hostname" "$architecture" "$image_version"
 printf 'Bundle: %s\n' "$bundle_directory"
+printf 'Release: %s\n' "$release_id"
 
 if $dry_run; then
   printf 'Dry run complete: no tablet files or services were changed.\n'
@@ -104,29 +122,60 @@ scp "${ssh_options[@]}" "$manifest" "$host:$remote_stage/manifest.json"
 scp "${ssh_options[@]}" "$resources" "$host:$remote_stage/resources.rcc"
 scp "${ssh_options[@]}" "$backend" "$host:$remote_stage/backend/entry"
 
-ssh "${ssh_options[@]}" "$host" sh -s -- "$remote_stage" "$restart_xovi" <<'REMOTE'
+ssh "${ssh_options[@]}" "$host" sh -s -- "$remote_stage" "$restart_xovi" "$release_id" <<'REMOTE'
 set -eu
 stage=$1
 restart_xovi=$2
+release_id=$3
 chmod 644 "$stage/manifest.json" "$stage/resources.rcc"
 chmod 700 "$stage/backend"
 chmod 755 "$stage/backend/entry"
 test -d /home/root/xovi/exthome/appload
-mkdir -p /home/root/.local/share/paperboard
-rm -rf /home/root/.local/share/paperboard/deployment-previous
+mkdir -p /home/root/.local/share/paperboard/releases
+rm -rf "/home/root/.local/share/paperboard/releases/$release_id"
+cp -a "$stage" "/home/root/.local/share/paperboard/releases/$release_id"
+count=0
+for release in $(ls -1dt /home/root/.local/share/paperboard/releases/* 2>/dev/null || true); do
+  count=$((count + 1))
+  test "$count" -le 3 || rm -rf -- "$release"
+done
+rm -rf /home/root/.local/share/paperboard/deployment-previous-2
+test ! -d /home/root/.local/share/paperboard/deployment-previous || mv /home/root/.local/share/paperboard/deployment-previous /home/root/.local/share/paperboard/deployment-previous-2
 if test -d /home/root/xovi/exthome/appload/paperboard; then
   mv /home/root/xovi/exthome/appload/paperboard \
     /home/root/.local/share/paperboard/deployment-previous
 fi
 mv "$stage" /home/root/xovi/exthome/appload/paperboard
+printf '%s\n' "$release_id" > /home/root/.local/share/paperboard/current-release
 if test "$restart_xovi" = true; then
   /home/root/xovi/start
 fi
 REMOTE
 trap - EXIT INT TERM
 
-if $restart_xovi; then
-  printf 'Paperboard deployed. Allow at least 15 seconds for the stock UI and AppLoad to settle.\n'
-else
-  printf 'Paperboard deployed. Use AppLoad Reload before launching the new bundle.\n'
+if $activate; then
+  if $restart_xovi; then
+    # Xovi/AppLoad caches QML frontends independently of their backend. A
+    # managed service restart is the only reliable way to load new resources.
+    sleep 15
+  elif ! REMARKABLE_HOST="$host" "$REPOSITORY_ROOT/scripts/tablet-companion.sh" return >/dev/null; then
+    "$REPOSITORY_ROOT/scripts/rollback-paperboard.sh" --host "$host" --activate || true
+    die "existing Paperboard process could not be stopped; rolled back"
+  else
+    # Backend-only releases do not require a Xovi restart, but allow AppLoad's
+    # asynchronous frontend teardown to settle before reconnecting.
+    sleep 3
+  fi
+  if ! REMARKABLE_HOST="$host" "$REPOSITORY_ROOT/scripts/tablet-companion.sh" launch paperboard >/dev/null; then
+    "$REPOSITORY_ROOT/scripts/rollback-paperboard.sh" --host "$host" --activate || true
+    die "Paperboard launch failed; rolled back"
+  fi
+  sleep 4
+  foreground="$(REMARKABLE_HOST="$host" "$REPOSITORY_ROOT/scripts/tablet-companion.sh" status | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(String(JSON.parse(s).foreground||"unknown")))')"
+  if [[ "$foreground" != paperboard ]]; then
+    "$REPOSITORY_ROOT/scripts/rollback-paperboard.sh" --host "$host" --activate || true
+    die "Paperboard did not become foreground; rolled back"
+  fi
 fi
+
+printf 'Paperboard deployed and activated transactionally.\n'

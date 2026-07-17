@@ -5,13 +5,13 @@ import { join } from "node:path";
 import type { CanvasEventInput, CanvasMessageInput, CardInput, CardPatch, DeliveryCard, PaperboardCommandAction, PaperboardUiState } from "@paperboard/core";
 
 type DeviceRow = { id: string; token_hash: string; cursor: number; last_seen_at: string | null; last_ack_cursor: number; provider_kind: string };
-type ClientRow = { id: string; token_hash: string; scopes: string };
+type ClientRow = { id: string; token_hash: string; scopes: string; created_at?: string; last_used_at?: string | null; revoked_at?: string | null };
 type CardRow = {
   id: string; device_id: string; cursor: number; kind: DeliveryCard["kind"]; title: string; body: string;
   progress: number | null; asset_id: string | null; priority: DeliveryCard["priority"]; pinned: number;
   replace_key: string | null; created_at: string; expires_at: string | null;
 };
-type CommandRow = { id: string; device_id: string; action: PaperboardCommandAction; status: string; detail: string; created_at: string; expires_at: string; completed_at: string | null };
+type CommandRow = { id: string; device_id: string; action: PaperboardCommandAction; target_id: string | null; status: string; detail: string; created_at: string; expires_at: string; completed_at: string | null };
 type CanvasSessionRow = { id: string; device_id: string; title: string; status: string; cursor: number; created_at: string; updated_at: string };
 type CanvasMessageRow = { id: string; session_id: string; cursor: number; title: string; body: string; asset_id: string | null; actions_json: string; replace_key: string | null; created_at: string };
 type CanvasHistoryRow = CanvasMessageRow & { session_title: string };
@@ -54,10 +54,14 @@ export class Store {
   }
 
   private migrate(): void {
+    this.db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+      version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`);
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS devices (
         id TEXT PRIMARY KEY, token_hash TEXT NOT NULL, cursor INTEGER NOT NULL DEFAULT 0,
         canvas_cursor INTEGER NOT NULL DEFAULT 0,
+        screen_target_id TEXT,
         last_seen_at TEXT, last_ack_cursor INTEGER NOT NULL DEFAULT 0,
         provider_kind TEXT NOT NULL DEFAULT 'none', provider_config TEXT,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -96,7 +100,7 @@ export class Store {
       );
       CREATE TABLE IF NOT EXISTS tablet_commands (
         id TEXT PRIMARY KEY, device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-        action TEXT NOT NULL, status TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
+        action TEXT NOT NULL, target_id TEXT, status TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL, expires_at TEXT NOT NULL, completed_at TEXT
       );
       CREATE INDEX IF NOT EXISTS tablet_commands_device ON tablet_commands(device_id, status, expires_at);
@@ -132,6 +136,24 @@ export class Store {
         )
       `);
     }
+    if (!deviceColumns.some((column) => column.name === "screen_target_id")) this.db.exec("ALTER TABLE devices ADD COLUMN screen_target_id TEXT");
+    this.db.prepare("INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (1, 'legacy-foundation')").run();
+    const clientColumns = this.db.prepare("PRAGMA table_info(clients)").all() as Array<{ name: string }>;
+    if (!clientColumns.some((column) => column.name === "last_used_at")) this.db.exec("ALTER TABLE clients ADD COLUMN last_used_at TEXT");
+    if (!clientColumns.some((column) => column.name === "revoked_at")) this.db.exec("ALTER TABLE clients ADD COLUMN revoked_at TEXT");
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS audit_events (
+        id INTEGER PRIMARY KEY, request_id TEXT NOT NULL, actor_id TEXT NOT NULL,
+        operation TEXT NOT NULL, device_id TEXT, outcome TEXT NOT NULL,
+        metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS audit_events_age ON audit_events(created_at);
+    `);
+    this.db.prepare("INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (2, 'v2-security-and-audit')").run();
+    const commandColumns = this.db.prepare("PRAGMA table_info(tablet_commands)").all() as Array<{ name: string }>;
+    if (!commandColumns.some((column) => column.name === "target_id")) this.db.exec("ALTER TABLE tablet_commands ADD COLUMN target_id TEXT");
+    this.db.prepare("INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (3, 'targeted-screen-presentation')").run();
+    this.db.prepare("INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (4, 'durable-screen-presentation')").run();
   }
 
   createDevice(id: string, tokenHash: string): void {
@@ -155,7 +177,26 @@ export class Store {
   }
 
   getClientByHash(tokenHash: string): ClientRow | undefined {
-    return this.db.prepare("SELECT id, token_hash, scopes FROM clients WHERE token_hash=?").get(tokenHash) as ClientRow | undefined;
+    const row = this.db.prepare("SELECT id, token_hash, scopes, created_at, last_used_at, revoked_at FROM clients WHERE token_hash=? AND revoked_at IS NULL").get(tokenHash) as ClientRow | undefined;
+    if (row) this.db.prepare("UPDATE clients SET last_used_at=? WHERE id=?").run(new Date().toISOString(), row.id);
+    return row;
+  }
+
+  listClients(): Array<Omit<ClientRow, "token_hash">> {
+    return this.db.prepare("SELECT id, scopes, created_at, last_used_at, revoked_at FROM clients ORDER BY id").all() as Array<Omit<ClientRow, "token_hash">>;
+  }
+
+  revokeClient(id: string): boolean {
+    return this.db.prepare("UPDATE clients SET revoked_at=? WHERE id=? AND revoked_at IS NULL").run(new Date().toISOString(), id).changes === 1;
+  }
+
+  audit(requestId: string, actorId: string, operation: string, deviceId: string | null, outcome: string, metadata: Record<string, unknown> = {}): void {
+    this.db.prepare("INSERT INTO audit_events(request_id, actor_id, operation, device_id, outcome, metadata_json) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(requestId, actorId, operation, deviceId, outcome, JSON.stringify(metadata));
+  }
+
+  migrationStatus(): Array<{ version: number; name: string; applied_at: string }> {
+    return this.db.prepare("SELECT version, name, applied_at FROM schema_migrations ORDER BY version").all() as Array<{ version: number; name: string; applied_at: string }>;
   }
 
   idempotentResponse(clientId: string, key: string): unknown | undefined {
@@ -254,7 +295,7 @@ export class Store {
     return rows.map((row) => ({
       id: row.id, cursor: row.cursor, kind: row.kind, title: row.title, body: row.body,
       ...(row.progress === null ? {} : { progress: row.progress }),
-      ...(row.asset_id === null ? {} : { asset_url: `${assetBaseUrl}/v1/device/${deviceId}/assets/${row.asset_id}` }),
+      ...(row.asset_id === null ? {} : { asset_url: `${assetBaseUrl}/v2/device/${deviceId}/assets/${row.asset_id}` }),
       priority: row.priority, pinned: Boolean(row.pinned), created_at: row.created_at,
       ...(row.expires_at === null ? {} : { expires_at: row.expires_at }),
     }));
@@ -278,6 +319,19 @@ export class Store {
       ON CONFLICT(device_id) DO UPDATE SET application=excluded.application, state_json=excluded.state_json, updated_at=excluded.updated_at`)
       .run(deviceId, state.application, JSON.stringify(state), now);
     this.heartbeat(deviceId, state.rendered_cursor);
+    if (state.active_message_id) {
+      this.db.prepare("UPDATE devices SET screen_target_id=NULL WHERE id=? AND screen_target_id=?")
+        .run(deviceId, state.active_message_id);
+    }
+  }
+
+  requestScreenPresentation(deviceId: string, messageId: string): void {
+    this.db.prepare("UPDATE devices SET screen_target_id=? WHERE id=?").run(messageId, deviceId);
+  }
+
+  screenPresentationTarget(deviceId: string): string | null {
+    const row = this.db.prepare("SELECT screen_target_id FROM devices WHERE id=?").get(deviceId) as { screen_target_id: string | null } | undefined;
+    return row?.screen_target_id ?? null;
   }
 
   getUiState(deviceId: string): (PaperboardUiState & { updated_at: string; fresh: boolean }) | undefined {
@@ -288,11 +342,11 @@ export class Store {
     return { ...state, foreground: state.foreground && fresh, updated_at: row.updated_at, fresh };
   }
 
-  createCommand(deviceId: string, action: PaperboardCommandAction): CommandRow {
+  createCommand(deviceId: string, action: PaperboardCommandAction, targetId: string | null = null): CommandRow {
     const now = new Date();
     const id = randomUUID().replaceAll("-", "");
-    this.db.prepare("INSERT INTO tablet_commands(id, device_id, action, status, created_at, expires_at) VALUES (?, ?, ?, 'queued', ?, ?)")
-      .run(id, deviceId, action, now.toISOString(), new Date(now.getTime() + 15_000).toISOString());
+    this.db.prepare("INSERT INTO tablet_commands(id, device_id, action, target_id, status, created_at, expires_at) VALUES (?, ?, ?, ?, 'queued', ?, ?)")
+      .run(id, deviceId, action, targetId, now.toISOString(), new Date(now.getTime() + 15_000).toISOString());
     return this.getCommand(deviceId, id)!;
   }
 
@@ -385,7 +439,7 @@ export class Store {
     if (!this.getCanvasSession(deviceId, sessionId)) return [];
     const rows = this.db.prepare("SELECT * FROM canvas_messages WHERE session_id=? ORDER BY cursor").all(sessionId) as CanvasMessageRow[];
     return rows.map((row) => ({ id: row.id, cursor: row.cursor, title: row.title, body: row.body, asset_id: row.asset_id,
-      ...(row.asset_id && assetBaseUrl ? { asset_url: `${assetBaseUrl}/v1/device/${deviceId}/assets/${row.asset_id}` } : {}),
+      ...(row.asset_id && assetBaseUrl ? { asset_url: `${assetBaseUrl}/v2/device/${deviceId}/assets/${row.asset_id}` } : {}),
       actions: JSON.parse(row.actions_json), created_at: row.created_at }));
   }
 
@@ -401,7 +455,7 @@ export class Store {
     return rows.reverse().map((row) => ({
       id: row.id, session_id: row.session_id, session_title: row.session_title,
       cursor: row.cursor, title: row.title, body: row.body, asset_id: row.asset_id,
-      ...(row.asset_id && assetBaseUrl ? { asset_url: `${assetBaseUrl}/v1/device/${deviceId}/assets/${row.asset_id}` } : {}),
+      ...(row.asset_id && assetBaseUrl ? { asset_url: `${assetBaseUrl}/v2/device/${deviceId}/assets/${row.asset_id}` } : {}),
       actions: JSON.parse(row.actions_json), created_at: row.created_at,
     }));
   }
@@ -447,6 +501,7 @@ export class Store {
     this.db.prepare("DELETE FROM idempotency WHERE created_at < datetime('now', '-1 day')").run();
     this.db.prepare("DELETE FROM tablet_commands WHERE created_at < datetime('now', '-1 day')").run();
     this.db.prepare("DELETE FROM canvas_events WHERE created_at < datetime('now', '-7 days')").run();
+    this.db.prepare("DELETE FROM audit_events WHERE created_at < datetime('now', '-30 days')").run();
   }
 
   newAssetPath(id: string): string { return join(this.assetsDir, `${id}.png`); }

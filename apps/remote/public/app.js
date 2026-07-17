@@ -5,9 +5,7 @@ const connectionText = document.querySelector("#connectionText");
 const frameState = document.querySelector("#frameState");
 const frameAge = document.querySelector("#frameAge");
 const statusText = document.querySelector("#statusText");
-const armButton = document.querySelector("#armButton");
-const armHint = document.querySelector("#armHint");
-const armDialog = document.querySelector("#armDialog");
+const inputState = document.querySelector("#inputState");
 const touchMark = document.querySelector("#touchMark");
 const intervalSelect = document.querySelector("#interval");
 
@@ -15,18 +13,19 @@ let token = "";
 let screen = { width: 1404, height: 1872 };
 let rotation = [0, 90, 180, 270].includes(Number(localStorage.getItem("paper-remote-rotation")))
   ? Number(localStorage.getItem("paper-remote-rotation")) : 180;
-let armedUntil = 0;
+let inputEnabled = false;
 let frameTimestamp = 0;
 let refreshTimer;
 let loading = false;
 let refreshRequested = false;
 let pointerStart;
+const basePath = location.pathname.startsWith("/remote") ? "/remote" : "";
 
 async function api(path, options = {}) {
   const headers = new Headers(options.headers);
   if (token) headers.set("x-paper-remote-token", token);
   if (options.body) headers.set("content-type", "application/json");
-  const response = await fetch(path, { ...options, headers, cache: "no-store" });
+  const response = await fetch(`${basePath}${path}`, { ...options, headers, cache: "no-store" });
   if (!response.ok) {
     let message = `Request failed (${response.status})`;
     try { message = (await response.json()).error ?? message; } catch {}
@@ -40,11 +39,8 @@ function setConnection(mode, text) {
   connectionText.textContent = text;
 }
 
-function renderArmState() {
-  const armed = Date.now() < armedUntil;
-  armButton.classList.toggle("armed", armed);
-  armButton.innerHTML = armed ? "<span>●</span> Input armed" : "<span>○</span> Disarmed";
-  armHint.textContent = armed ? `Auto-disarms in ${Math.max(1, Math.ceil((armedUntil - Date.now()) / 60000))} min.` : "Unlock the tablet physically before arming.";
+function renderInputState() {
+  inputState.textContent = inputEnabled ? "● Enabled on this private endpoint" : "○ Disabled by server policy";
 }
 
 function drawImage(image) {
@@ -121,21 +117,20 @@ function flashTouch(event) {
 }
 
 async function sendInput(body) {
-  if (Date.now() >= armedUntil) { armedUntil = 0; renderArmState(); armDialog.showModal(); return; }
-  armButton.classList.add("busy");
+  if (!inputEnabled) { statusText.textContent = "Remote input is disabled by the server kill switch"; return; }
   statusText.textContent = body.action === "tap" ? "Sending tap…" : "Sending swipe…";
   try {
     const response = await api("/api/input", { method: "POST", body: JSON.stringify(body) });
     const result = await response.json();
-    armedUntil = result.armed_until;
+    inputEnabled = result.input_enabled;
     statusText.textContent = "Input delivered; refreshing display";
-    setTimeout(() => loadFrame(true), 75);
+    setTimeout(() => loadFrame(true), 100);
+    setTimeout(() => loadFrame(true), 700);
   } catch (error) {
     statusText.textContent = error.message;
-    if (error.message.includes("disarmed")) armedUntil = 0;
+    if (error.message.includes("disabled")) inputEnabled = false;
   } finally {
-    armButton.classList.remove("busy");
-    renderArmState();
+    renderInputState();
   }
 }
 
@@ -162,22 +157,6 @@ canvas.addEventListener("pointerup", event => {
 });
 canvas.addEventListener("pointercancel", () => { pointerStart = undefined; });
 
-armButton.addEventListener("click", async () => {
-  if (Date.now() < armedUntil) {
-    const response = await api("/api/disarm", { method: "POST", body: "{}" });
-    armedUntil = (await response.json()).armed_until;
-    renderArmState();
-  } else armDialog.showModal();
-});
-armDialog.addEventListener("close", async () => {
-  if (armDialog.returnValue !== "confirm") return;
-  try {
-    const response = await api("/api/arm", { method: "POST", body: JSON.stringify({ confirmed_unlocked: true }) });
-    armedUntil = (await response.json()).armed_until;
-    renderArmState();
-    statusText.textContent = "Input armed for this local session";
-  } catch (error) { statusText.textContent = error.message; }
-});
 document.querySelector("#rotateButton").addEventListener("click", () => {
   rotation = (rotation + 90) % 360;
   localStorage.setItem("paper-remote-rotation", String(rotation));
@@ -192,24 +171,23 @@ document.querySelectorAll("[data-control]").forEach(button => button.addEventLis
   try {
     const response = await api("/api/control", { method: "POST", body: JSON.stringify({ action }) });
     const result = await response.json();
-    armedUntil = result.armed_until;
-    renderArmState();
+    inputEnabled = result.input_enabled;
+    renderInputState();
     setTimeout(() => loadFrame(true), 900);
   } catch (error) { statusText.textContent = error.message; }
   finally { button.disabled = false; }
 }));
 
 setInterval(() => {
-  renderArmState();
   frameAge.textContent = frameTimestamp ? `${Math.max(0, Math.round((Date.now() - frameTimestamp) / 1000))}s` : "—";
 }, 1000);
 
 try {
-  const session = await (await fetch("/api/session", { cache: "no-store" })).json();
+  const session = await (await fetch(`${basePath}/api/session`, { cache: "no-store" })).json();
   token = session.token;
-  armedUntil = session.armed_until;
+  inputEnabled = session.input_enabled;
   screen = session.screen;
-  renderArmState();
+  renderInputState();
   await loadFrame(true);
 } catch (error) {
   setConnection("error", "Local server unavailable");

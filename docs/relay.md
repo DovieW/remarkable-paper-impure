@@ -1,107 +1,74 @@
 # Paperboard relay
 
-## TrueNAS always-on deployment
+The relay is the private control/data plane between agents, providers, and the
+tablet. It exposes the versioned client API on private-tailnet HTTPS, a device
+poll API authenticated by a device token, and an admin API on host loopback.
 
-`deploy/relay/compose.truenas.yml` moves the existing relay identity and durable
-state to a TrueNAS custom app. Stop the WSL relay before copying its SQLite
-database, assets, master key, client/device token state, and Tailscale state.
-Verify archive checksums before starting the TrueNAS app and retain the stopped
-WSL volumes until rollback is no longer needed.
+## Components
 
-The public tailnet HTTPS listener proxies only the client API. The admin
-listener remains on container loopback. The optional tablet bridge is part of
-the relay process but uses a forced-command SSH key that rejects arbitrary
-shell commands, paths, taps, and passcodes. Screenshot output is streamed from
-the tablet and never written by the relay.
+- SQLite stores cards, Screen sessions/events, cursors, audits, clients, and
+  migrations.
+- Assets are normalized and expire on a bounded schedule.
+- A tablet bridge performs allowlisted SSH status, launch, exit, screenshot,
+  and semantic command operations.
+- TRMNL Hosted BYOD and Terminus adapters map provider frames into Dashboard
+  cards.
+- Tailscale Serve terminates private HTTPS. Funnel must remain disabled.
 
-For the Windows/WSL deployment, that key is mounted as a Docker secret. The
-container entrypoint copies it into tmpfs with mode 0600 before dropping
-privileges. The mounted SSH configuration pins the host key learned over
-physical USB; the bridge accepts only status, installed-app enumeration,
-explicit AppLoad launch/return, and one ephemeral screenshot operation.
+## TrueNAS Scale
 
-Do not start the TrueNAS deployment with a new Tailscale identity while the old
-relay is still active under the same hostname.
+Use `deploy/relay/compose.truenas.yml`. Persistent datasets are required for
+relay data, Tailscale state, restricted tablet SSH material, and the Remote
+kill-switch directory. All owner-specific paths/hostnames live in ignored
+`.env` files.
 
-The relay is a small Node.js 24 service backed by SQLite. It stores only the
-current queue, normalized image assets, hashed tokens, encrypted provider
-configuration, idempotency responses, and body-free delivery events.
+The compose stack:
 
-## WSL host with Windows already on the tailnet
+- pins the Tailscale image digest;
+- shares only Tailscale's network namespace;
+- mounts secrets as files;
+- keeps admin on `127.0.0.1:8788`;
+- runs relay read-only with dropped capabilities;
+- serves Remote under `/remote/` and relay at `/`.
 
-This is the simplest path when Windows Tailscale is already running:
-
-```bash
-pnpm install --frozen-lockfile
-scripts/check-paperboard-host.sh
-scripts/init-paperboard-relay.sh
-```
-
-Edit ignored `deploy/relay/.env` locally. Set the private HTTPS address that
-Windows Tailscale Serve will provide. Do not commit or paste that hostname or
-the contents of `secrets/`.
+Validate before starting:
 
 ```bash
-scripts/start-paperboard-relay-windows.sh
-curl --fail http://127.0.0.1:8787/healthz
+docker compose --env-file deploy/relay/.env \
+  -f deploy/relay/compose.truenas.yml config --quiet
 ```
 
-The script starts the relay in WSL, bound to Windows loopback, and asks the
-installed Windows Tailscale CLI to Serve it over private tailnet HTTPS. It does
-not enable Funnel or public ingress.
+Provision through an SSH tunnel to the admin listener, never by publishing the
+admin port. `scripts/provision-paperboard-device.sh` creates one device and a
+v2 client, writing credentials only to ignored mode-0600 files.
 
-## Portable container-side Tailscale
+## Migration and audit
 
-On a Linux host where the relay should own its tailnet node:
+The relay applies migrations at startup. Inspect them with:
 
 ```bash
-scripts/start-paperboard-relay.sh
+paperboard admin migrations
+paperboard admin client list
 ```
 
-The portable Compose stack shares the Tailscale sidecar's userspace network
-namespace. Use a tagged, reusable auth key and tailnet policy appropriate to
-the deployment.
+Revoke legacy or unused clients after issuing v2 scopes. Audit records capture
+mutating operation, client, device, resource, request ID, and timestamp without
+storing bearer tokens.
 
-## Provision identities
+## Backups
 
-The admin listener is loopback-only on port `8788`; it is intentionally absent
-from the tailnet listener.
+Use filesystem/ZFS snapshots of the persistent dataset. Do not add a second
+application-specific backup format. Snapshot before upgrading, retain according
+to the NAS policy, and test restoration into a separate path/container.
 
-```bash
-scripts/provision-paperboard-device.sh \
-  --device paper-pure --client local-agent
-```
+## Health
 
-To add another least-privilege agent without rotating or reprovisioning the
-tablet identity:
+- relay HTTP health and private HTTPS reachability;
+- device heartbeat and acknowledgement cursor;
+- tablet bridge SSH status;
+- migration list;
+- Remote `/api/session` health;
+- `scripts/paperboard-doctor.sh` from a trusted operator host.
 
-```bash
-scripts/provision-paperboard-client.sh \
-  --client example-agent --device paper-pure
-```
-
-Device and agent tokens are different. Tokens are shown only once to the
-provisioning script, written to ignored mode-0600 files, and stored in SQLite
-only as SHA-256 hashes. Rotate a tablet token with the admin CLI and reinstall
-its config if compromise is suspected.
-
-## Persistence and retention
-
-- SQLite uses WAL mode in the `relay-data` volume.
-- Unpinned cards expire after their TTL; default five minutes, maximum 24h.
-- Normalized image assets expire after 24h.
-- Idempotency responses expire after one day.
-- Delivery records contain device, cursor, action, and timestamp only; no card
-  title/body. They expire after seven days.
-- Provider credentials are AES-256-GCM encrypted using the separate master key
-  mounted at runtime.
-
-Back up the Docker volume and both secret files together if relay recovery is
-required. A database without the master key cannot decrypt provider config.
-
-## Container boundary
-
-The relay runs read-only, with a small tmpfs, `no-new-privileges`, and all
-capabilities dropped. A tiny entrypoint uses only `SETUID`/`SETGID` to read
-group-only Docker secrets, then PID 1 becomes an unprivileged Node process with
-no effective capabilities. The admin API is a separate local listener.
+A queued receipt is not proof of tablet display. Use status cursor/heartbeat
+and last acknowledgement before reporting successful delivery.

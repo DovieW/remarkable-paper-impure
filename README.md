@@ -1,132 +1,108 @@
 # Paper Pure developer starter kit
 
-An agent-first toolkit for safely bringing a **reMarkable Paper Pure** from
-Developer Mode to a useful, hackable Linux tablet. It keeps the stock writing
-experience while making SSH access, backups, recovery preparation, custom
-applications, and compatibility research repeatable.
+An agent-first toolkit for safely turning a **reMarkable Paper Pure** in
+Developer Mode into a backed-up, recoverable development device. It preserves
+the stock notebook experience while adding reproducible SSH access, custom
+applications, a private programmable display, and narrow remote operations.
 
 > [!WARNING]
-> Developer Mode weakens the tablet's security posture and factory-resets it
-> when enabled. Do not use a modified tablet for confidential work data or
-> enterprise accounts without explicit organizational approval.
+> Developer Mode weakens the tablet security posture and may factory-reset it.
+> Do not put enterprise or confidential work data on a modified tablet without
+> explicit organizational approval.
 
-## Give this repository to an AI agent
+## Hand this repository to an AI agent
 
-Clone it in WSL or Linux, open the folder with your agent, and say:
+Clone it in WSL or Linux, open the folder, and say:
 
-> Read `AGENTS.md` completely. Help me bring my new reMarkable Paper Pure from
-> zero to safe, key-authenticated SSH access. Stop for every physical or
-> password step, never ask me to paste the device password into chat, and do
-> not install optional software until you have identified and backed up the
-> tablet.
+> Read `AGENTS.md` completely. Bring my Paper Pure from zero to safe,
+> key-authenticated SSH access. Stop at physical and password boundaries,
+> identify and back up the device before writes, and keep personal values out
+> of Git.
 
-The agent's complete operating contract is in [AGENTS.md](AGENTS.md). The
-human-facing walkthrough is [Zero-to-running quickstart](docs/agent-quickstart.md).
+The binding agent contract is [AGENTS.md](AGENTS.md). The owner walkthrough is
+[docs/agent-quickstart.md](docs/agent-quickstart.md). Local device details live
+only in ignored `PERSONAL.md`, created from `PERSONAL.example.md`.
 
-## What is included
+## Safe order
 
-- `scripts/bootstrap-ssh.sh` — establishes a dedicated, host-key-pinned USB
-  connection and optionally enables trusted-LAN Wi-Fi SSH.
-- `scripts/status.sh` — read-only device, service, storage, and custom-stack
-  inventory.
-- `scripts/backup.sh` — read-only document and state backup with checksums.
-- `docs/security.md` — the security boundary and required practices.
-- `docs/recovery.md` — official recovery preparation and destructive-action
-  warnings.
-- `docs/custom-software.md` — a tested Vellum, Xovi, AppLoad, and KOReader
-  example for one exact OS version.
-- `docs/resources.md` — official and community starting points.
-- `docs/agent-autonomy.md` — rules and tooling for agents to launch, observe,
-  and verify work themselves while preserving authentication boundaries.
-- `docs/paperboard.md` — the private output queue and Paper Pure application.
-- `docs/canvas.md` — the manually opened interactive touch UI for agent sessions.
-- `docs/remote.md` — a local SSH-only browser mirror with click and swipe input.
-- `docs/home-assistant.md` — the risk-tiered, allowlisted Paperboard Canvas adapter.
-- `docs/relay.md` — hardened relay deployment for WSL/Windows or Linux.
-- `docs/agent-tools.md` — generic CLI and MCP tools for any AI agent.
-- `docs/providers.md` — TRMNL Hosted BYOD and Terminus integration.
-- `docs/tailscale.md` — private connectivity and tested topology.
-- `scripts/configure-paperboard.sh` and `scripts/remove-paperboard.sh` — private
-  URL configuration and reversible removal for Paperboard.
-- `PERSONAL.example.md` — template for the ignored local `PERSONAL.md` where
-  each owner records device- and network-specific context.
+1. Sync or back up documents before enabling Developer Mode.
+2. Connect by USB and run `scripts/bootstrap-ssh.sh` in the owner's terminal.
+3. Identify the tablet with `scripts/status.sh --host remarkable-usb`.
+4. Back up with `scripts/backup.sh --host remarkable-usb` and verify checksums.
+5. Read [docs/recovery.md](docs/recovery.md) before modifying the device.
+6. Add one reversible capability at a time.
 
-## Tested baseline
+The exact supported custom-app baseline is machine-readable in
+[`config/compatibility.json`](config/compatibility.json). Deployment fails
+closed when the observed platform, architecture, or OS is not approved.
 
-The repository was initially validated on:
+## Paperboard v2
 
-| Property | Value |
-| --- | --- |
-| Device | reMarkable Paper Pure |
-| Platform | `imx93-tatsu` |
-| Architecture | `aarch64` |
-| reMarkable OS image | `3.27.3.0` |
-| Host environment | WSL2 |
+Paperboard v2 is one tablet application with three modes:
 
-This is a compatibility record, not permission to assume every Paper Pure is
-still on that version. Agents must inspect the connected device before writes.
+- **Dashboard** is a quiet queue of cards. Posting never steals focus.
+- **Screen** is agent-presented, interactive content. Presenting foregrounds
+  Paperboard by default and supports choices, confirmations, checklists,
+  toggles, selections, sliders, links, images, and pen strokes.
+- **Reader** opens only constrained public HTTPS links. Private, loopback,
+  link-local, credential-bearing, and unsafe redirect destinations are blocked.
 
-## Safe order of operations
+Tap once to show the white top and bottom controls and tap again to hide them.
+Screen content scrolls continuously. The latest 100 displays are retained;
+after 45 minutes Screen returns to Dashboard. The old separate Canvas app and
+v1 names are retired—see [docs/v2-migration.md](docs/v2-migration.md).
 
-1. Read the official Developer Mode warning and sync important documents.
-2. Enable Developer Mode, complete the reset, unlock the tablet, and enable
-   its USB web interface.
-3. Establish key-authenticated USB SSH with `scripts/bootstrap-ssh.sh`.
-4. Run `scripts/status.sh --host remarkable-usb` and record the exact platform.
-5. Run and verify `scripts/backup.sh --host remarkable-usb`.
-6. Prepare a recovery route appropriate to the host computer.
-7. Only then evaluate launchers, readers, dashboards, or other applications.
+Every integration uses the same v2 operation vocabulary:
 
-## Paperboard
+```text
+dashboard show|update|list|get|delete|clear|wait
+screen start|present|list|status|events|ack|close
+device status|apps|launch|exit|screenshot|control|command-status
+admin device|client|provider|migrations
+```
 
-The first repository-native application is [Paperboard](docs/paperboard.md), a
-private output queue for agents and ambient dashboards. Its AppLoad UI renders
-messages, progress, and authenticated images; a hardened relay supports CLI,
-MCP, TRMNL Hosted BYOD, and self-hosted Terminus. Delivery never launches the
-app or interrupts notebooks—queued output appears when the owner opens it.
+See [docs/agent-tools.md](docs/agent-tools.md) for CLI and MCP use, and
+[docs/paperboard.md](docs/paperboard.md) for the application behavior.
 
-For the tested WSL setup where Windows is already on the tailnet, start with:
+## Relay and remote
+
+The relay supports native Paperboard clients, TRMNL Hosted BYOD, and self-hosted
+Terminus. It is designed for a private tailnet and keeps its admin listener on
+host loopback. [docs/relay.md](docs/relay.md) covers deployment.
+
+Paper Pure Remote provides an ephemeral browser mirror with bounded tap/swipe
+input. It never automates unlock, accepts text, or exposes arbitrary shell.
+The TrueNAS deployment serves it under `/remote/` only to devices permitted by
+the tailnet ACL; an on-disk kill switch still disables input immediately. See
+[docs/remote.md](docs/remote.md).
+
+## Development and release checks
 
 ```bash
 pnpm install --frozen-lockfile
-scripts/init-paperboard-relay.sh
-scripts/start-paperboard-relay-windows.sh
+pnpm check
+pnpm test
+scripts/build-paperboard.sh --clean
+scripts/release-check.sh
 ```
 
-Then follow [Paperboard](docs/paperboard.md) for tablet Tailscale, provisioning,
-deployment, and a first card. Secrets and private hostnames live only under
-ignored `secrets/` and `deploy/*/.env` files.
+There is deliberately no public CI pipeline for device deployment. The manual
+release check validates shell scripts, the v2 contract, TypeScript, tests, QML
+bundle construction, formatting, and tracked/history secret patterns.
 
-[Canvas](docs/canvas.md) is a separate AppLoad application for interactive
-agent prompts and structured touch responses. This separation keeps Paperboard
-quiet and ambient while allowing agents to offer choices, confirmations, and
-checklists when a person explicitly opens Canvas.
+Key guides:
 
-For supervised development, [Paper Pure Remote](docs/remote.md) mirrors the
-physical display into a local browser and maps clicks and drags to bounded
-tablet gestures. It binds only to `127.0.0.1`, begins with input disarmed, and
-never handles the tablet passcode:
-
-```bash
-scripts/start-paper-remote.sh
-```
-
-## Project rules
-
-- Prefer official documentation, reviewed source, pinned releases, and hashes.
-- Never commit passwords, private keys, device identifiers, LAN addresses,
-  account tokens, user documents, or backup data.
-- Put necessary owner-specific operational details in ignored `PERSONAL.md`;
-  keep actual credentials in a password manager, not Markdown.
-- Build reusable SSH-only tooling when it removes routine physical handoffs;
-  never automate passcode entry or create an unauthenticated control service.
-- Never assume software for reMarkable 1/2, Paper Pro, or Paper Pro Move works
-  on Paper Pure.
-- Every device-changing procedure needs verification and rollback instructions.
-- Do not use unreviewed `curl | sh` or similar root installers.
-
-See [Security](docs/security.md) before changing a device.
+- [Security](docs/security.md)
+- [Recovery](docs/recovery.md)
+- [Backups](docs/backups.md)
+- [Custom software](docs/custom-software.md)
+- [Paperboard](docs/paperboard.md)
+- [Relay](docs/relay.md)
+- [Agent tools](docs/agent-tools.md)
+- [Remote](docs/remote.md)
+- [Providers](docs/providers.md)
+- [Resources](docs/resources.md)
 
 ## License
 
-The repository is available under the [MIT License](LICENSE).
+[MIT](LICENSE)
