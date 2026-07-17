@@ -35,13 +35,25 @@ avoids leaving a transient agent response on the ambient device indefinitely.
 Reader is deliberately narrow. It accepts public HTTPS destinations only,
 rejects credentials and non-default ports, resolves DNS before connecting,
 blocks private/special addresses, validates every redirect, limits response
-size/time, and renders extracted text rather than arbitrary web scripts.
+size/time, and renders extracted text and safe links rather than arbitrary web
+scripts. Choose **Browse** from Dashboard, then enter an address or search
+phrase with the tablet keyboard. Bare domains are upgraded to HTTPS; other
+input is sent to DuckDuckGo Lite search.
+
+Reader keeps the most recent 25 pages in memory for **Back** and **Forward**.
+**Reload** re-fetches the current page. **Save** persists a bookmark in the
+relay; **Bookmarks** lists the newest 100 saved pages for that tablet. Browser
+history is intentionally session-only, while bookmarks survive restarts.
+Reader does not execute JavaScript, submit forms, retain cookies, download
+files, or attempt to reproduce a full desktop browser.
 
 ## On-device controls
 
 - Tap content once to show white-backed top and bottom controls.
 - Tap again to hide them.
 - Vertical drags scroll Screen content smoothly.
+- Reader pages also scroll smoothly; page links are large e-ink-friendly
+  targets and browser controls appear in the white bottom bar.
 - Horizontal drags navigate Screen history only after gesture direction is
   unambiguous; they do not toggle the controls.
 - **Exit** returns to AppLoad/stock UI.

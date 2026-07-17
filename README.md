@@ -44,8 +44,11 @@ Paperboard v2 is one tablet application with three modes:
 - **Screen** is agent-presented, interactive content. Presenting foregrounds
   Paperboard by default and supports choices, confirmations, checklists,
   toggles, selections, sliders, links, images, and pen strokes.
-- **Reader** opens only constrained public HTTPS links. Private, loopback,
-  link-local, credential-bearing, and unsafe redirect destinations are blocked.
+- **Reader** is a lightweight, script-free browser for constrained public HTTPS
+  pages. It accepts addresses or searches, exposes safe page links, keeps 25
+  pages of in-session back/forward history, and persists up to 100 bookmarks.
+  Private, loopback, link-local, credential-bearing, and unsafe redirects are
+  blocked.
 
 Tap once to show the white top and bottom controls and tap again to hide them.
 Screen content scrolls continuously. The latest 100 displays are retained;

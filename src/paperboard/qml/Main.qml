@@ -55,6 +55,17 @@ Rectangle {
     property string readerTitle: "Web reader"
     property string readerBody: ""
     property string readerUrl: ""
+    property var readerLinks: []
+    property var readerHistory: []
+    property int readerHistoryIndex: -1
+    property var readerBookmarks: []
+    property bool readerBookmarked: false
+    property bool readerLoading: false
+    property bool readerKeyboardVisible: false
+    property bool readerUppercase: false
+    property bool readerBookmarkView: false
+    property string readerInput: ""
+    property string readerNavigationMode: "push"
     property string toastText: ""
     property string lastAction: ""
     property string lastResult: ""
@@ -107,7 +118,7 @@ Rectangle {
             card_count: cards.length, ambient_mode: ambientMode, controls_visible: controlsVisible,
             history_index: mode === "screen" && screenMessages.length ? screenIndex : null,
             history_count: screenMessages.length,
-            scroll_offset: mode === "screen" ? screenFlick.contentY : 0,
+            scroll_offset: mode === "screen" ? screenFlick.contentY : (mode === "reader" ? readerFlick.contentY : 0),
             active_session_id: reportedScreen.session_id || null,
             active_message_id: reportedScreen.id || null,
             last_interaction_at: new Date(lastInteractionAt).toISOString(),
@@ -126,7 +137,7 @@ Rectangle {
         if (mode === "screen" || mode === "reader") screenHandoffTimer.restart()
         else screenHandoffTimer.stop()
         visualChanged(2)
-        if (notify !== false) showToast(mode === "screen" ? "Screen" : "Dashboard")
+        if (notify !== false) showToast(mode === "screen" ? "Screen" : (mode === "reader" ? "Browser" : "Dashboard"))
         stateReportTimer.restart()
     }
 
@@ -166,7 +177,7 @@ Rectangle {
                 if (screenMessages[screenCandidate].id === previousScreenId) screenIndex = screenCandidate
         }
         if (snapshot.ui_state && snapshot.ui_state.mode && lastAppliedAt === 0)
-            mode = snapshot.ui_state.mode === "screen" ? "screen" : "dashboard"
+            mode = ["screen", "reader"].indexOf(snapshot.ui_state.mode) >= 0 ? snapshot.ui_state.mode : "dashboard"
         if (screenMessages.length && (currentScreen.id || "") !== previousScreenId) {
             screenFlick.contentY = 0
             touchActivity()
@@ -225,11 +236,97 @@ Rectangle {
         touchActivity(); showToast("Response sent")
     }
 
+    function readerIsSaved(url) {
+        for (var index = 0; index < readerBookmarks.length; index++)
+            if (readerBookmarks[index].url === url) return true
+        return false
+    }
+
+    function applyReaderPage(page) {
+        var normalized = {
+            url: page.url || "", title: page.title || "Web reader",
+            body: page.body || "", links: page.links || []
+        }
+        readerTitle = normalized.title
+        readerBody = normalized.body
+        readerUrl = normalized.url
+        readerInput = normalized.url
+        readerLinks = normalized.links
+        readerBookmarks = page.bookmarks || readerBookmarks
+        readerBookmarked = page.bookmarked === true || readerIsSaved(normalized.url)
+        if (readerNavigationMode === "reload" && readerHistoryIndex >= 0) {
+            var replaced = readerHistory.slice(0)
+            replaced[readerHistoryIndex] = normalized
+            readerHistory = replaced
+        } else {
+            var next = readerHistory.slice(0, readerHistoryIndex + 1)
+            next.push(normalized)
+            if (next.length > 25) next.shift()
+            readerHistory = next
+            readerHistoryIndex = next.length - 1
+        }
+        readerNavigationMode = "push"
+        readerLoading = false
+        readerBookmarkView = false
+        readerFlick.contentY = 0
+        setMode("reader", false)
+        fullRefresh()
+    }
+
+    function readerNavigate(input, behavior) {
+        var value = String(input || "").trim()
+        if (!value.length) { showToast("Enter an address or search"); return }
+        readerNavigationMode = behavior || "push"
+        readerKeyboardVisible = false
+        readerBookmarkView = false
+        readerLoading = true
+        readerInput = value
+        readerTitle = "Opening…"
+        readerBody = "Fetching a simplified, script-free public page."
+        readerLinks = []
+        setMode("reader", false)
+        endpoint.sendMessage(9, JSON.stringify({input: value}))
+        showToast("Loading")
+    }
+
+    function readerShowHistory(index) {
+        if (index < 0 || index >= readerHistory.length) return
+        readerHistoryIndex = index
+        var page = readerHistory[index]
+        readerTitle = page.title; readerBody = page.body; readerUrl = page.url
+        readerInput = page.url; readerLinks = page.links || []
+        readerBookmarked = readerIsSaved(page.url)
+        readerBookmarkView = false; readerLoading = false; readerFlick.contentY = 0
+        touchActivity(); visualChanged(2); fullRefresh()
+    }
+
+    function readerBack() {
+        if (readerHistoryIndex > 0) readerShowHistory(readerHistoryIndex - 1)
+        else setMode("dashboard", true)
+    }
+    function readerForward() { readerShowHistory(readerHistoryIndex + 1) }
+    function readerReload() {
+        if (readerUrl.length) readerNavigate(readerUrl, "reload")
+        else { readerKeyboardVisible = true; readerInput = ""; showControls() }
+    }
+
+    function readerToggleBookmark() {
+        if (!readerUrl.length) { showToast("Nothing to save"); return }
+        endpoint.sendMessage(10, JSON.stringify({url: readerUrl, title: readerTitle || readerUrl}))
+        showToast(readerBookmarked ? "Removing bookmark" : "Saving bookmark")
+    }
+
+    function readerKey(value) {
+        if (value === "BACKSPACE") readerInput = readerInput.slice(0, -1)
+        else if (value === "SPACE") readerInput += " "
+        else if (value === "CLEAR") readerInput = ""
+        else readerInput += value
+        touchActivity(); visualChanged(1)
+    }
+
     function openReader(action) {
         submitScreenAction(action, action.url)
-        readerTitle = "Opening…"; readerBody = "Fetching a simplified public HTTPS page."; readerUrl = action.url
-        setMode("reader", false)
-        endpoint.sendMessage(9, JSON.stringify({url: action.url}))
+        readerNavigate(action.url, "push")
     }
 
     function toggleScreenValue(action, option) {
@@ -335,6 +432,12 @@ Rectangle {
             } else if (type === 103) {
                 root.backendState = "OFFLINE"
                 root.backendDetail = contents
+                if (root.mode === "reader" && root.readerLoading) {
+                    root.readerLoading = false
+                    root.readerTitle = "Page unavailable"
+                    root.readerBody = contents
+                    root.fullRefresh()
+                }
             } else if (type === 104) {
                 root.legacyCandidate = false
                 root.backendState = "LEGACY"
@@ -353,12 +456,16 @@ Rectangle {
             } else if (type === 108) {
                 try {
                     var page = JSON.parse(contents)
-                    root.readerTitle = page.title || "Web reader"
-                    root.readerBody = page.body || ""
-                    root.readerUrl = page.url || root.readerUrl
-                    root.setMode("reader", false)
-                    root.fullRefresh()
+                    root.applyReaderPage(page)
                 } catch (error) { root.showToast("Reader response invalid") }
+            } else if (type === 109) {
+                try {
+                    var bookmarkState = JSON.parse(contents)
+                    root.readerBookmarks = bookmarkState.bookmarks || []
+                    root.readerBookmarked = root.readerIsSaved(root.readerUrl)
+                    root.visualChanged(1)
+                    if (root.readerUrl.length) root.showToast(root.readerBookmarked ? "Bookmark saved" : "Bookmark removed")
+                } catch (error) { root.showToast("Bookmark response invalid") }
             }
         }
     }
@@ -709,9 +816,106 @@ Rectangle {
                 }
                 Column {
                     id: readerColumn; width: readerFlick.width; height: childrenRect.height + 50 * root.unit; spacing: 22 * root.unit
-                    Text { text: root.readerTitle; width: parent.width; wrapMode: Text.WordWrap; color: ink; font.family: "EB Garamond"; font.pixelSize: 70 * root.unit; font.weight: Font.Medium }
-                    Text { text: root.readerUrl; width: parent.width; elide: Text.ElideMiddle; color: muted; font.family: "Noto Mono"; font.pixelSize: 15 * root.unit }
-                    Text { text: root.readerBody; width: parent.width; height: implicitHeight; wrapMode: Text.WordWrap; color: ink; font.family: "EB Garamond"; font.pixelSize: 32 * root.unit; lineHeight: 1.18 }
+                    Text {
+                        text: root.readerBookmarkView ? "SAVED PAGES" : (root.readerLoading ? "FETCHING PUBLIC HTTPS" : "PAPER WEB")
+                        width: parent.width; color: accent; font.family: "Noto Mono"; font.pixelSize: 15 * root.unit
+                        font.bold: true; font.letterSpacing: 2 * root.unit
+                    }
+                    Text {
+                        text: root.readerBookmarkView ? "Saved for later" : root.readerTitle
+                        width: parent.width; wrapMode: Text.WordWrap; color: ink; font.family: "EB Garamond"
+                        font.pixelSize: 70 * root.unit; font.weight: Font.Medium
+                    }
+                    Text {
+                        visible: !root.readerBookmarkView; height: visible ? implicitHeight : 0
+                        text: root.readerUrl; width: parent.width; elide: Text.ElideMiddle; color: muted
+                        font.family: "Noto Mono"; font.pixelSize: 15 * root.unit
+                    }
+                    Text {
+                        visible: !root.readerBookmarkView; height: visible ? implicitHeight : 0
+                        text: root.readerBody; width: parent.width; wrapMode: Text.WordWrap; color: ink
+                        font.family: "EB Garamond"; font.pixelSize: 32 * root.unit; lineHeight: 1.18
+                    }
+                    Text {
+                        visible: !root.readerBookmarkView && root.readerLinks.length > 0
+                        height: visible ? implicitHeight : 0; text: "CONTINUE READING"; width: parent.width
+                        color: accent; font.family: "Noto Mono"; font.pixelSize: 15 * root.unit
+                        font.bold: true; font.letterSpacing: 2 * root.unit
+                    }
+                    Repeater {
+                        model: root.readerBookmarkView ? root.readerBookmarks : root.readerLinks
+                        Rectangle {
+                            id: readerLinkButton
+                            required property var modelData
+                            width: readerColumn.width; height: 78 * root.unit; color: paper
+                            border.width: 2 * root.unit; border.color: ink
+                            Text {
+                                anchors.left: parent.left; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                                anchors.margins: 22 * root.unit
+                                text: readerLinkButton.modelData.label || readerLinkButton.modelData.title || readerLinkButton.modelData.url
+                                color: ink; elide: Text.ElideRight; font.family: "EB Garamond"; font.pixelSize: 27 * root.unit
+                            }
+                            MouseArea { anchors.fill: parent; onClicked: root.readerNavigate(readerLinkButton.modelData.url, "push") }
+                        }
+                    }
+                    Text {
+                        visible: root.readerBookmarkView && root.readerBookmarks.length === 0
+                        text: "No saved pages yet. Open a page, then choose SAVE."
+                        width: parent.width; wrapMode: Text.WordWrap; color: muted
+                        font.family: "EB Garamond"; font.pixelSize: 32 * root.unit
+                    }
+                }
+            }
+
+            Rectangle {
+                id: readerKeyboard
+                anchors.fill: parent; visible: root.mode === "reader" && root.readerKeyboardVisible
+                color: paper; border.width: 3 * root.unit; border.color: ink; z: 40
+                Column {
+                    anchors.fill: parent; anchors.margins: 42 * root.unit; spacing: 18 * root.unit
+                    Text { text: "FIND A PAGE"; color: accent; font.family: "Noto Mono"; font.pixelSize: 16 * root.unit; font.bold: true; font.letterSpacing: 2 * root.unit }
+                    Text { text: "Enter a public HTTPS address or search the web"; color: ink; font.family: "EB Garamond"; font.pixelSize: 46 * root.unit }
+                    Rectangle {
+                        width: parent.width; height: 92 * root.unit; color: "white"; border.width: 3 * root.unit; border.color: ink
+                        TextInput {
+                            id: addressInput; anchors.fill: parent; anchors.margins: 20 * root.unit
+                            text: root.readerInput; color: ink; selectionColor: accent; clip: true
+                            font.family: "Noto Mono"; font.pixelSize: 25 * root.unit
+                            onTextChanged: root.readerInput = text
+                            onAccepted: root.readerNavigate(text, "push")
+                        }
+                    }
+                    Grid {
+                        id: readerKeys; width: parent.width; columns: 10; spacing: 8 * root.unit
+                        Repeater {
+                            model: ["1","2","3","4","5","6","7","8","9","0","q","w","e","r","t","y","u","i","o","p","a","s","d","f","g","h","j","k","l",".","z","x","c","v","b","n","m","-","/","?"]
+                            Rectangle {
+                                required property string modelData
+                                width: (readerKeys.width - readerKeys.spacing * 9) / 10; height: 62 * root.unit
+                                color: "white"; border.width: 2 * root.unit; border.color: ink
+                                Text { anchors.centerIn: parent; text: root.readerUppercase ? modelData.toUpperCase() : modelData; color: ink; font.family: "Noto Mono"; font.pixelSize: 20 * root.unit; font.bold: true }
+                                MouseArea { anchors.fill: parent; onClicked: root.readerKey(root.readerUppercase ? modelData.toUpperCase() : modelData) }
+                            }
+                        }
+                    }
+                    Row {
+                        width: parent.width; height: 70 * root.unit; spacing: 9 * root.unit
+                        Repeater {
+                            model: ["SHIFT", "CLEAR", "BACKSPACE", "SPACE", "GO", "CLOSE"]
+                            Rectangle {
+                                required property string modelData
+                                width: (parent.width - parent.spacing * 5) / 6; height: parent.height
+                                color: modelData === "GO" ? ink : "white"; border.width: 2 * root.unit; border.color: ink
+                                Text { anchors.centerIn: parent; text: modelData; color: modelData === "GO" ? paper : ink; font.family: "Noto Mono"; font.pixelSize: 15 * root.unit; font.bold: true }
+                                MouseArea { anchors.fill: parent; onClicked: {
+                                    if (modelData === "GO") root.readerNavigate(root.readerInput, "push")
+                                    else if (modelData === "CLOSE") { root.readerKeyboardVisible = false; root.visualChanged(1) }
+                                    else if (modelData === "SHIFT") { root.readerUppercase = !root.readerUppercase; root.visualChanged(1) }
+                                    else root.readerKey(modelData)
+                                } }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -762,7 +966,7 @@ Rectangle {
             z: 10
 
             Repeater {
-                model: root.mode === "reader" ? ["BACK", "TOP", "DASHBOARD", "EXIT"] : (root.mode === "screen" ? ["PREV", "NEXT", "TOP", "DASHBOARD", "REFRESH", "EXIT"] : ["PREV", "NEXT", "PIN", "DISMISS", "AMBIENT", "SCREEN", "REFRESH", "EXIT"])
+                model: root.mode === "reader" ? ["BACK", "FORWARD", "ADDRESS", "RELOAD", root.readerBookmarked ? "UNSAVE" : "SAVE", "BOOKMARKS", "TOP", "DASHBOARD", "EXIT"] : (root.mode === "screen" ? ["PREV", "NEXT", "TOP", "DASHBOARD", "REFRESH", "EXIT"] : ["PREV", "NEXT", "PIN", "DISMISS", "AMBIENT", "SCREEN", "BROWSE", "REFRESH", "EXIT"])
                 Rectangle {
                     required property string modelData
                     width: (controls.width - controls.spacing * (controls.children.length - 1)) / controls.children.length
@@ -785,11 +989,17 @@ Rectangle {
                             if (modelData === "PREV") root.mode === "screen" ? root.moveScreen(-1) : root.move(-1)
                             else if (modelData === "NEXT") root.mode === "screen" ? root.moveScreen(1) : root.move(1)
                             else if (modelData === "TOP") { if (root.mode === "reader") readerFlick.contentY = 0; else screenFlick.contentY = 0; root.touchActivity(); root.visualChanged(1) }
-                            else if (modelData === "BACK") root.setMode("screen", true)
+                            else if (modelData === "BACK") root.readerBack()
+                            else if (modelData === "FORWARD") root.readerForward()
+                            else if (modelData === "ADDRESS") { root.readerInput = root.readerUrl; root.readerKeyboardVisible = true; addressInput.forceActiveFocus(); root.visualChanged(1) }
+                            else if (modelData === "RELOAD") root.readerReload()
+                            else if (modelData === "SAVE" || modelData === "UNSAVE") root.readerToggleBookmark()
+                            else if (modelData === "BOOKMARKS") { root.readerBookmarkView = !root.readerBookmarkView; readerFlick.contentY = 0; root.visualChanged(2) }
                             else if (modelData === "PIN" && root.currentCard.id) endpoint.sendMessage(5, root.currentCard.id)
                             else if (modelData === "DISMISS" && root.currentCard.id) endpoint.sendMessage(4, root.currentCard.id)
                             else if (modelData === "AMBIENT") { if (root.ambientMode) { root.ambientMode = false; root.visualChanged(1); root.showToast("Ambient mode off"); root.reportState() } else root.selectAmbient(true) }
                             else if (modelData === "SCREEN") root.setMode("screen", true)
+                            else if (modelData === "BROWSE") { root.setMode("reader", false); root.readerInput = ""; root.readerKeyboardVisible = true; addressInput.forceActiveFocus(); root.visualChanged(2) }
                             else if (modelData === "DASHBOARD") root.setMode("dashboard", true)
                             else if (modelData === "REFRESH") { endpoint.sendMessage(1, "refresh"); root.showToast("Refreshing") }
                             else if (modelData === "EXIT") root.returnToLauncher()

@@ -28,9 +28,10 @@ not reboot the tablet, but it briefly interrupts the stock UI. Reserve
 `--no-restart-xovi` for a verified backend-only build.
 
 Verify Dashboard queue-only behavior, Screen foreground/presentation and
-history, Reader rejection of a private URL, tap-to-toggle chrome, one-hour
-handoff configuration, Exit, screenshot, and rollback metadata. Capture no
-confidential display in release artifacts.
+history, Reader address/search navigation, links, back/forward/reload,
+bookmark persistence, and rejection of a private URL, plus tap-to-toggle
+chrome, one-hour handoff configuration, Exit, screenshot, and rollback
+metadata. Capture no confidential display in release artifacts.
 
 Only after verification should changes be committed and pushed. Re-run the
 secret scan against the final commit before making the repository public.

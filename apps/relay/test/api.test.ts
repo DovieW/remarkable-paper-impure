@@ -112,6 +112,33 @@ test("card lifecycle is authenticated, idempotent, ordered, and isolated", async
   assert.equal(status.json().last_ack_cursor, poll.json().cursor);
 });
 
+test("reader bookmarks persist per device and toggle through device-authenticated endpoints", async (context) => {
+  const current = fixture();
+  context.after(async () => { await current.adminApp.close(); await current.app.close(); rmSync(current.root, { recursive: true, force: true }); });
+  const first = await provision(current.adminApp, current.config.adminToken);
+  const second = await provision(current.adminApp, current.config.adminToken, "pure-two");
+  const firstHeaders = { authorization: `Bearer ${first.deviceToken}` };
+  const secondHeaders = { authorization: `Bearer ${second.deviceToken}` };
+
+  const denied = await current.app.inject({ method: "GET", url: "/v2/device/pure-one/reader/bookmarks" });
+  assert.equal(denied.statusCode, 401);
+  const empty = await current.app.inject({ method: "GET", url: "/v2/device/pure-one/reader/bookmarks", headers: firstHeaders });
+  assert.deepEqual(empty.json().bookmarks, []);
+
+  const saved = await current.app.inject({ method: "POST", url: "/v2/device/pure-one/reader/bookmarks", headers: firstHeaders,
+    payload: { url: "https://example.com/article", title: "A quiet article" } });
+  assert.equal(saved.statusCode, 200);
+  assert.equal(saved.json().bookmarked, true);
+  assert.equal(saved.json().bookmarks[0].title, "A quiet article");
+  const isolated = await current.app.inject({ method: "GET", url: "/v2/device/pure-two/reader/bookmarks", headers: secondHeaders });
+  assert.deepEqual(isolated.json().bookmarks, []);
+
+  const removed = await current.app.inject({ method: "POST", url: "/v2/device/pure-one/reader/bookmarks", headers: firstHeaders,
+    payload: { url: "https://example.com/article", title: "A quiet article" } });
+  assert.equal(removed.json().bookmarked, false);
+  assert.deepEqual(removed.json().bookmarks, []);
+});
+
 test("normalizes uploaded images and protects assets with the device token", async (context) => {
   const current = fixture();
   context.after(async () => { await current.adminApp.close(); await current.app.close(); rmSync(current.root, { recursive: true, force: true }); });

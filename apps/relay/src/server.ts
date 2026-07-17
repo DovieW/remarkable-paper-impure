@@ -20,6 +20,13 @@ const idemSchema = z.string().min(8).max(160);
 const sessionParamSchema = deviceParamSchema.extend({ session: z.string().min(8).max(80) });
 const eventParamSchema = sessionParamSchema.extend({ event: z.string().min(8).max(80) });
 const commandParamSchema = deviceParamSchema.extend({ command: z.string().min(8).max(80) });
+const readerBookmarkSchema = z.object({
+  url: z.string().url().max(2048).refine((value) => {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password && !url.port;
+  }, "bookmark must be a credential-free public HTTPS URL"),
+  title: z.string().trim().min(1).max(160),
+});
 
 function deny(reply: FastifyReply): FastifyReply { return reply.code(401).send({ error: "unauthorized" }); }
 function bad(reply: FastifyReply, error: unknown): FastifyReply {
@@ -391,8 +398,23 @@ export function buildServer(config: RelayConfig): RelayServer {
   app.post("/v2/device/:device/reader", async (request, reply) => {
     const { device } = deviceParamSchema.parse(request.params); if (!requireDevice(request, store, device)) return deny(reply);
     try {
-      const { url } = z.object({ url: z.string().url().startsWith("https://").max(2048) }).parse(request.body);
-      return await fetchReaderPage(url);
+      const body = z.object({ input: z.string().trim().min(1).max(2048).optional(), url: z.string().trim().min(1).max(2048).optional() })
+        .refine((item) => Boolean(item.input || item.url), "reader input is required").parse(request.body);
+      const page = await fetchReaderPage(body.input ?? body.url!);
+      return { ...page, bookmarked: store.isReaderBookmark(device, page.url), bookmarks: store.readerBookmarks(device) };
+    } catch (error) { return bad(reply, error); }
+  });
+
+  app.get("/v2/device/:device/reader/bookmarks", async (request, reply) => {
+    const { device } = deviceParamSchema.parse(request.params); if (!requireDevice(request, store, device)) return deny(reply);
+    return { bookmarks: store.readerBookmarks(device) };
+  });
+
+  app.post("/v2/device/:device/reader/bookmarks", async (request, reply) => {
+    const { device } = deviceParamSchema.parse(request.params); if (!requireDevice(request, store, device)) return deny(reply);
+    try {
+      const bookmark = readerBookmarkSchema.parse(request.body);
+      return store.toggleReaderBookmark(device, bookmark.url, bookmark.title);
     } catch (error) { return bad(reply, error); }
   });
 

@@ -3,7 +3,7 @@ import test from "node:test";
 import { isPrivateAddress, validateUpstreamUrl } from "../src/images.js";
 
 test("classifies private and special network destinations", () => {
-  for (const address of ["127.0.0.1", "10.1.2.3", "172.20.1.1", "192.168.1.1", "169.254.1.2", "::1", "fd00::1", "fe80::1"]) assert.equal(isPrivateAddress(address), true, address);
+  for (const address of ["127.0.0.1", "10.1.2.3", "172.20.1.1", "192.168.1.1", "169.254.1.2", "198.18.0.1", "203.0.113.5", "224.0.0.1", "::", "::1", "::ffff:127.0.0.1", "fd00::1", "fe80::1", "fe90::1", "ff02::1"]) assert.equal(isPrivateAddress(address), true, address);
   assert.equal(isPrivateAddress("1.1.1.1"), false);
   assert.equal(isPrivateAddress("2606:4700:4700::1111"), false);
 });

@@ -36,7 +36,11 @@ device, client, admin, provider, Tailscale, or private hostname values.
 - Dashboard text rejects HTML and Markdown images.
 - Uploaded images are normalized before storage.
 - Reader fetches require public HTTPS and revalidate DNS/redirects to prevent
-  server-side request forgery.
+  server-side request forgery. They are capped at 2 MiB, use no browser cookie
+  jar, and execute no page JavaScript. Search terms go to DuckDuckGo Lite.
+- Reader bookmarks retain only the public URL, page title, and creation time;
+  they are device-scoped and capped at 100. In-session navigation history is
+  not written to the relay database.
 - Screenshots are returned ephemerally and are not retained by the relay.
 - Screen history is capped at 100 displays; event and asset retention is
   bounded.

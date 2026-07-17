@@ -33,8 +33,10 @@
 enum {
     MSG_REFRESH = 1, MSG_ACCEPT = 2, MSG_REJECT = 3, MSG_DISMISS = 4, MSG_PIN = 5,
     MSG_UI_STATE = 6, MSG_COMMAND_RESULT = 7, MSG_CANVAS_EVENT = 8, MSG_READER_OPEN = 9,
+    MSG_READER_BOOKMARK = 10,
     MSG_STATUS = 101, MSG_CANDIDATE = 102, MSG_ERROR = 103, MSG_LAST_GOOD = 104,
     MSG_SNAPSHOT = 105, MSG_COMMAND = 106, MSG_ACTION_RESULT = 107, MSG_READER = 108,
+    MSG_READER_BOOKMARKS = 109,
 };
 
 #define MSG_SYSTEM_TERMINATE UINT32_MAX
@@ -524,6 +526,23 @@ static void relay_reader_open(const char *body) {
     free(response.data);
 }
 
+static void relay_reader_bookmarks(void) {
+    char url[4600]; struct buffer response = { 0 };
+    snprintf(url, sizeof(url), "%s/v2/device/%s/reader/bookmarks", config.relay_url, config.device_id);
+    if (http_json(url, NULL, &response, 10L) == 0 && response.data != NULL)
+        send_message(MSG_READER_BOOKMARKS, response.data);
+    free(response.data);
+}
+
+static void relay_reader_bookmark(const char *body) {
+    char url[4600]; struct buffer response = { 0 };
+    snprintf(url, sizeof(url), "%s/v2/device/%s/reader/bookmarks", config.relay_url, config.device_id);
+    if (http_json(url, body, &response, 10L) == 0 && response.data != NULL)
+        send_message(MSG_READER_BOOKMARKS, response.data);
+    else send_message(MSG_ERROR, "Reader bookmark could not be updated");
+    free(response.data);
+}
+
 static void accept_candidate(void) {
     if (rename(CANDIDATE_PATH, LAST_GOOD_PATH) != 0) { send_message(MSG_ERROR, "Could not atomically promote decoded image."); return; }
     (void)chmod(LAST_GOOD_PATH, 0600); send_message(MSG_LAST_GOOD, LAST_GOOD_PATH);
@@ -555,7 +574,7 @@ int main(int argc, char **argv) {
         if (header.type == MSG_SYSTEM_TERMINATE) break;
         if (header.type == MSG_SYSTEM_NEW_COORDINATOR) {
             if (!config_valid) send_message(MSG_ERROR, error);
-            else if (config.relay_mode) { send_cached_snapshot(); send_message(MSG_STATUS, "CONNECTED"); }
+            else if (config.relay_mode) { send_cached_snapshot(); relay_reader_bookmarks(); send_message(MSG_STATUS, "CONNECTED"); }
             else if (access(LAST_GOOD_PATH, R_OK) == 0) send_message(MSG_LAST_GOOD, LAST_GOOD_PATH);
             else send_message(MSG_STATUS, "OFFLINE");
         } else if (header.type == MSG_REFRESH) {
@@ -569,6 +588,7 @@ int main(int argc, char **argv) {
         else if (header.type == MSG_COMMAND_RESULT && config.relay_mode) relay_command_result(contents);
         else if (header.type == MSG_CANVAS_EVENT && config.relay_mode) relay_canvas_event(contents);
         else if (header.type == MSG_READER_OPEN && config.relay_mode) relay_reader_open(contents);
+        else if (header.type == MSG_READER_BOOKMARK && config.relay_mode) relay_reader_bookmark(contents);
     }
     stopping = 1; free(contents); close(socket_fd);
     if (!thread_started) curl_global_cleanup();

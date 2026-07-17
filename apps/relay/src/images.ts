@@ -11,15 +11,22 @@ const MAX_PIXELS = 40_000_000;
 function privateIpv4(address: string): boolean {
   const octets = address.split(".").map(Number);
   const [a, b] = octets;
+  if (a === undefined || b === undefined || octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) return true;
   return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) ||
     (a === 172 && b !== undefined && b >= 16 && b <= 31) || (a === 192 && b === 168) ||
-    (a === 100 && b !== undefined && b >= 64 && b <= 127);
+    (a === 100 && b !== undefined && b >= 64 && b <= 127) ||
+    (a === 192 && (b === 0 || b === 2)) || (a === 198 && (b === 18 || b === 19 || b === 51)) ||
+    (a === 203 && b === 0) || a >= 224;
 }
 
 function privateIpv6(address: string): boolean {
   const normalized = address.toLowerCase();
-  return normalized === "::" || normalized === "::1" || normalized.startsWith("fe80:") ||
-    normalized.startsWith("fc") || normalized.startsWith("fd");
+  const mappedIpv4 = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(normalized)?.[1];
+  if (mappedIpv4) return privateIpv4(mappedIpv4);
+  const firstGroup = Number.parseInt(normalized.split(":", 1)[0] || "0", 16);
+  return normalized === "::" || normalized === "::1" ||
+    (firstGroup >= 0xfe80 && firstGroup <= 0xfebf) ||
+    (firstGroup >= 0xfc00 && firstGroup <= 0xfdff) || firstGroup >= 0xff00;
 }
 
 export function isPrivateAddress(address: string): boolean {

@@ -15,6 +15,7 @@ type CommandRow = { id: string; device_id: string; action: PaperboardCommandActi
 type CanvasSessionRow = { id: string; device_id: string; title: string; status: string; cursor: number; created_at: string; updated_at: string };
 type CanvasMessageRow = { id: string; session_id: string; cursor: number; title: string; body: string; asset_id: string | null; actions_json: string; replace_key: string | null; created_at: string };
 type CanvasHistoryRow = CanvasMessageRow & { session_title: string };
+export interface ReaderBookmark { url: string; title: string; created_at: string; }
 
 export const CANVAS_HISTORY_LIMIT = 100;
 
@@ -154,6 +155,15 @@ export class Store {
     if (!commandColumns.some((column) => column.name === "target_id")) this.db.exec("ALTER TABLE tablet_commands ADD COLUMN target_id TEXT");
     this.db.prepare("INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (3, 'targeted-screen-presentation')").run();
     this.db.prepare("INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (4, 'durable-screen-presentation')").run();
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS reader_bookmarks (
+        device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+        url TEXT NOT NULL, title TEXT NOT NULL, created_at TEXT NOT NULL,
+        PRIMARY KEY(device_id, url)
+      );
+      CREATE INDEX IF NOT EXISTS reader_bookmarks_device_age ON reader_bookmarks(device_id, created_at DESC);
+    `);
+    this.db.prepare("INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (5, 'reader-bookmarks')").run();
   }
 
   createDevice(id: string, tokenHash: string): void {
@@ -340,6 +350,28 @@ export class Store {
     const state = JSON.parse(row.state_json) as PaperboardUiState;
     const fresh = Date.now() - Date.parse(row.updated_at) <= 10_000;
     return { ...state, foreground: state.foreground && fresh, updated_at: row.updated_at, fresh };
+  }
+
+  readerBookmarks(deviceId: string): ReaderBookmark[] {
+    return this.db.prepare("SELECT url, title, created_at FROM reader_bookmarks WHERE device_id=? ORDER BY created_at DESC LIMIT 100")
+      .all(deviceId) as unknown as ReaderBookmark[];
+  }
+
+  isReaderBookmark(deviceId: string, url: string): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM reader_bookmarks WHERE device_id=? AND url=?").get(deviceId, url));
+  }
+
+  toggleReaderBookmark(deviceId: string, url: string, title: string): { bookmarked: boolean; bookmarks: ReaderBookmark[] } {
+    const existing = this.db.prepare("SELECT 1 FROM reader_bookmarks WHERE device_id=? AND url=?").get(deviceId, url);
+    if (existing) this.db.prepare("DELETE FROM reader_bookmarks WHERE device_id=? AND url=?").run(deviceId, url);
+    else {
+      this.db.prepare("INSERT INTO reader_bookmarks(device_id, url, title, created_at) VALUES (?, ?, ?, ?)")
+        .run(deviceId, url, title, new Date().toISOString());
+      this.db.prepare(`DELETE FROM reader_bookmarks WHERE device_id=? AND url IN (
+        SELECT url FROM reader_bookmarks WHERE device_id=? ORDER BY created_at DESC LIMIT -1 OFFSET 100
+      )`).run(deviceId, deviceId);
+    }
+    return { bookmarked: !existing, bookmarks: this.readerBookmarks(deviceId) };
   }
 
   createCommand(deviceId: string, action: PaperboardCommandAction, targetId: string | null = null): CommandRow {
