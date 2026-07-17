@@ -28,7 +28,7 @@ not reboot the tablet, but it briefly interrupts the stock UI. Reserve
 `--no-restart-xovi` for a verified backend-only build.
 
 Verify Dashboard queue-only behavior, Screen foreground/presentation and
-history, Reader rejection of a private URL, tap-to-toggle chrome, 45-minute
+history, Reader rejection of a private URL, tap-to-toggle chrome, one-hour
 handoff configuration, Exit, screenshot, and rollback metadata. Capture no
 confidential display in release artifacts.
 

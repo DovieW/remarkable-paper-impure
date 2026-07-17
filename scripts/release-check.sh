@@ -19,6 +19,9 @@ node -e '
   const compatibility=JSON.parse(fs.readFileSync("config/compatibility.json","utf8"));
   if (!compatibility.approved_os || !Object.keys(compatibility.approved_os).length) throw new Error("no approved OS release");
 '
+grep -Fq 'interval: 60 * 60 * 1000' src/paperboard/qml/Main.qml
+grep -Fq 'paperboard admin provider set' scripts/configure-paperboard-trmnl-hosted.sh
+grep -Fq 'paperboard admin provider set' scripts/configure-paperboard-terminus-local.sh
 pnpm test
 scripts/build-paperboard.sh --clean
 git diff --check

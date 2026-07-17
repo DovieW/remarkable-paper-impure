@@ -10,6 +10,8 @@ hosted plugin, recipe, playlist, and scheduler ecosystem. The relay calls the
 documented `/api/display` endpoint with `ID` and `access-token` headers, fetches
 the returned absolute image URL, and normalizes it for Paper Pure.
 
+Reference: [TRMNL Display API](https://docs.trmnl.com/go/private-api/screens).
+
 In the TRMNL web app, open the BYOD device's settings and copy its device ID
 and Device API Key. Keep both values out of chat and command-line arguments.
 Run the local helper and enter both values at its hidden local prompts:
@@ -132,7 +134,7 @@ currently informational—Paperboard deliberately keeps the one-minute floor.
 Switch providers with another `provider set`, or disable ambient output:
 
 ```bash
-pnpm paperboard provider set --device paper-pure --kind none
+pnpm paperboard admin provider set --device paper-pure --kind none
 ```
 
 Provider credentials are encrypted at rest. They never go to the tablet; only

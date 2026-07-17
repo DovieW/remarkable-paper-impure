@@ -44,7 +44,7 @@ printf '%s' "$access_token" > "$token_file"
 unset access_token
 
 PAPERBOARD_ADMIN_TOKEN="$(<"$admin_token_file")" \
-  pnpm --dir "$repo_root" --silent paperboard provider set \
+  pnpm --dir "$repo_root" --silent paperboard admin provider set \
     --device "$device" \
     --kind trmnl-hosted \
     --base-url https://trmnl.com \

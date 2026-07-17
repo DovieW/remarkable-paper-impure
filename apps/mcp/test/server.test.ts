@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { operationRegistry } from "@paperboard/core";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createPaperboardMcpServer, type PaperboardToolClient } from "../src/server.js";
@@ -37,12 +38,11 @@ test("lists the agent tools and maps progress input to a replaceable card", asyn
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
 
   const listed = await client.listTools();
-  assert.deepEqual(listed.tools.map((tool) => tool.name).sort(), [
-    "dashboard_asset_upload", "dashboard_clear", "dashboard_delete", "dashboard_get", "dashboard_list", "dashboard_show",
-    "dashboard_show_image", "dashboard_update", "dashboard_wait", "device_apps", "device_command_status",
-    "device_control", "device_exit", "device_launch", "device_screenshot", "device_status", "screen_ack", "screen_close",
-    "screen_events", "screen_list", "screen_present", "screen_start", "screen_status",
-  ]);
+  assert.deepEqual(
+    listed.tools.map((tool) => tool.name).sort(),
+    [...operationRegistry.map((item) => item.mcp), "dashboard_show_image", "dashboard_wait"].sort(),
+    "MCP must expose every public v2 operation plus its two safe convenience tools",
+  );
   const response = await client.callTool({ name: "dashboard_show", arguments: {
     device: "paper-pure", title: "Building", body: "Almost there", progress: 42,
     replace_key: "build-status",

@@ -35,7 +35,7 @@ export function createPaperboardMcpServer(client: PaperboardToolClient, options:
 
   server.registerTool(operation("dashboard.card.create").mcp, {
     title: "Show on Paperboard dashboard",
-    description: "Use for dashboard requests. Queue an ambient Paperboard card without launching an app or interrupting the current foreground app. Do not use this for a screen request; screens belong in Paperboard Canvas.",
+    description: "Use for dashboard requests. Queue an ambient Paperboard card without launching an app or interrupting the current foreground app. Do not use this for a screen request; interactive content belongs in Paperboard Screen.",
     inputSchema: {
       device, title: z.string(), body: z.string().default(""),
       progress: z.number().min(0).max(100).optional(),

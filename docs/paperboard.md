@@ -27,7 +27,7 @@ creates a PNG preview for consumers that cannot interpret strokes. The newest
 100 displays are retained across sessions. Schema limits keep retained content
 well below the 100 MiB safety budget; uploaded assets expire separately.
 
-If Screen remains open for 45 minutes, Paperboard returns to Dashboard. This
+If Screen remains open for one hour, Paperboard returns to Dashboard. This
 avoids leaving a transient agent response on the ambient device indefinitely.
 
 ### Reader

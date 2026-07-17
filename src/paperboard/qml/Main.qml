@@ -303,7 +303,7 @@ Rectangle {
     Timer { id: stateReportTimer; interval: 50; repeat: false; onTriggered: root.reportState() }
     Timer { id: chromeTimer; interval: 6000; repeat: false; onTriggered: root.hideControls() }
     Timer { id: toastTimer; interval: 2000; repeat: false; onTriggered: { root.toastText = ""; root.visualChanged(1) } }
-    Timer { id: screenHandoffTimer; interval: 45 * 60 * 1000; repeat: false; onTriggered: root.setMode("dashboard", true) }
+    Timer { id: screenHandoffTimer; interval: 60 * 60 * 1000; repeat: false; onTriggered: root.setMode("dashboard", true) }
     Timer {
         id: startupRefreshTimer
         interval: 250

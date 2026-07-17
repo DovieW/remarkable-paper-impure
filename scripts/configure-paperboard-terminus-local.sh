@@ -19,7 +19,7 @@ printf '\n'
 [[ -n "$upstream_device" ]] || die "device ID cannot be empty"
 
 PAPERBOARD_ADMIN_TOKEN="$(<"$admin_token_file")" \
-  pnpm --dir "$REPOSITORY_ROOT" --silent paperboard provider set \
+  pnpm --dir "$REPOSITORY_ROOT" --silent paperboard admin provider set \
     --device "$device" \
     --kind terminus \
     --base-url "http://host.docker.internal:$local_port" \

@@ -5,12 +5,28 @@ import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 
 type DisplayResponse = { image_url?: unknown; status?: unknown; refresh_rate?: unknown };
+type ProviderDependencies = {
+  validateUpstreamUrl: typeof validateUpstreamUrl;
+  fetch: typeof fetch;
+  fetchImage: typeof fetchImage;
+  normalizeImage: typeof normalizeImage;
+};
+
+const defaultDependencies: ProviderDependencies = { validateUpstreamUrl, fetch, fetchImage, normalizeImage };
 
 export class ProviderManager {
   private timer?: NodeJS.Timeout;
   private running = false;
+  private readonly dependencies: ProviderDependencies;
 
-  constructor(private readonly store: Store, private readonly masterKey: Buffer, private readonly publicBaseUrl: string) {}
+  constructor(
+    private readonly store: Store,
+    private readonly masterKey: Buffer,
+    private readonly publicBaseUrl: string,
+    dependencies: Partial<ProviderDependencies> = {},
+  ) {
+    this.dependencies = { ...defaultDependencies, ...dependencies };
+  }
 
   set(deviceId: string, input: ProviderInput): boolean {
     const parsed = providerSchema.parse(input);
@@ -45,12 +61,12 @@ export class ProviderManager {
     if (provider.kind === "none") return;
     const base = provider.base_url.replace(/\/$/, "");
     const displayUrl = `${base}/api/display`;
-    await validateUpstreamUrl(displayUrl, provider.kind === "terminus" && provider.allow_private_http);
+    await this.dependencies.validateUpstreamUrl(displayUrl, provider.kind === "terminus" && provider.allow_private_http);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10_000);
     let response: Response;
     try {
-      response = await fetch(displayUrl, {
+      response = await this.dependencies.fetch(displayUrl, {
         redirect: "error", signal: controller.signal,
         headers: {
           accept: "application/json",
@@ -67,8 +83,8 @@ export class ProviderManager {
       const advertised = new URL(payload.image_url);
       imageUrl = new URL(`${advertised.pathname}${advertised.search}`, `${base}/`).toString();
     }
-    const input = await fetchImage(imageUrl, undefined, provider.kind === "terminus" && provider.allow_private_http);
-    const normalized = await normalizeImage(input);
+    const input = await this.dependencies.fetchImage(imageUrl, undefined, provider.kind === "terminus" && provider.allow_private_http);
+    const normalized = await this.dependencies.normalizeImage(input);
     const previous = this.store.db.prepare("SELECT sha256 FROM assets WHERE device_id=? ORDER BY created_at DESC LIMIT 1").get(deviceId) as { sha256: string } | undefined;
     if (previous?.sha256 === normalized.sha256) return;
     const assetId = randomUUID().replaceAll("-", "");

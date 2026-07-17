@@ -25,7 +25,7 @@ three releases and two previous deployment references are retained. Manual
 rollback is:
 
 ```bash
-scripts/rollback-paperboard.sh --host remarkable-usb
+scripts/rollback-paperboard.sh --host remarkable-usb --activate
 ```
 
 After verifying v2, remove the old separate Canvas package through AppLoad.

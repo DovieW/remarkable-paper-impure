@@ -49,7 +49,7 @@ Paperboard v2 is one tablet application with three modes:
 
 Tap once to show the white top and bottom controls and tap again to hide them.
 Screen content scrolls continuously. The latest 100 displays are retained;
-after 45 minutes Screen returns to Dashboard. The old separate Canvas app and
+after one hour Screen returns to Dashboard. The old separate Canvas app and
 v1 names are retired—see [docs/v2-migration.md](docs/v2-migration.md).
 
 Every integration uses the same v2 operation vocabulary:
