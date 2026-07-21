@@ -29,6 +29,12 @@ Rectangle {
     property bool altHeld: false
     property bool shiftHeld: false
     property bool symbolLayer: false
+    property bool followOutput: true
+    property int terminalRows: 30
+    property int terminalCols: 100
+    property int cursorRow: 0
+    property int cursorCol: 0
+    property bool cursorVisible: false
     property int visualChanges: 0
     property double lastFullRefresh: 0
 
@@ -36,6 +42,16 @@ Rectangle {
     FontLoader {
         id: terminalFont
         source: "file:///home/root/xovi/exthome/appload/paperterm/fonts/NotoMonoNerdFontMono-Regular.ttf"
+    }
+    Text {
+        id: terminalCellProbe
+        visible: false
+        text: "M"
+        font.family: terminalFont.name.length ? terminalFont.name : "NotoMono Nerd Font Mono"
+        font.pixelSize: 22 * root.unit
+        font.hintingPreference: Font.PreferNoHinting
+        onImplicitWidthChanged: geometryUpdate.restart()
+        onImplicitHeightChanged: geometryUpdate.restart()
     }
     function unloading() { endpoint.terminate() }
     function exitApp() { endpoint.terminate() }
@@ -60,6 +76,10 @@ Rectangle {
             if (code >= 64 && code <= 95) output = String.fromCharCode(code - 64)
         }
         if (altHeld) output = "\u001b" + output
+        if (output === "\u000c") {
+            followOutput = true
+            clearScreenRefresh.restart()
+        }
         endpoint.sendMessage(2, JSON.stringify({text: output}))
         ctrlHeld = false
         altHeld = false
@@ -82,6 +102,10 @@ Rectangle {
             alt: !!macro.alt,
             shift: !!macro.shift
         }))
+        if (!!macro.ctrl && String(macro.key).toLowerCase() === "l") {
+            followOutput = true
+            clearScreenRefresh.restart()
+        }
         ctrlHeld = false
         altHeld = false
         shiftHeld = false
@@ -92,8 +116,11 @@ Rectangle {
         hasTerminalFrame = false
         connectionPending = true
         sessionActive = true
+        followOutput = true
+        cursorVisible = false
         statusText = "Connecting"
         endpoint.sendMessage(1, JSON.stringify({id: id}))
+        geometryUpdate.restart()
     }
 
     function disconnectSession() {
@@ -101,6 +128,8 @@ Rectangle {
         connectionPending = false
         hasTerminalFrame = false
         terminalText = ""
+        cursorVisible = false
+        followOutput = true
         statusText = "Ready"
         endpoint.sendMessage(5, "disconnect")
         changed(2)
@@ -136,6 +165,10 @@ Rectangle {
                 if (code >= 64 && code <= 95) output = String.fromCharCode(code - 64)
             }
             if (event.modifiers & Qt.AltModifier) output = "\u001b" + output
+            if (output === "\u000c") {
+                root.followOutput = true
+                clearScreenRefresh.restart()
+            }
             endpoint.sendMessage(2, JSON.stringify({text: output}))
             event.accepted = true
         }
@@ -157,15 +190,24 @@ Rectangle {
             } else if (type === 102) {
                 try {
                     var snapshot = JSON.parse(contents)
+                    var wasFollowing = root.followOutput || terminalFlick.atYEnd ||
+                        terminalFlick.contentY >= terminalFlick.contentHeight - terminalFlick.height - 80
                     root.terminalText = (snapshot.lines || []).join("\n")
                     root.sessionActive = !!snapshot.connected
+                    root.terminalRows = Number(snapshot.rows) || root.terminalRows
+                    root.terminalCols = Number(snapshot.cols) || root.terminalCols
+                    root.cursorRow = Math.max(0, Number(snapshot.cursor_row) || 0)
+                    root.cursorCol = Math.max(0, Number(snapshot.cursor_col) || 0)
+                    root.cursorVisible = !!snapshot.cursor_visible && root.sessionActive
                     var firstFrame = !root.hasTerminalFrame && root.terminalText.trim().length > 0
                     if (root.terminalText.trim().length > 0) {
                         root.hasTerminalFrame = true
                         root.connectionPending = false
                     }
-                    if (terminalFlick.atYEnd || terminalFlick.contentY >= terminalFlick.contentHeight - terminalFlick.height - 80)
+                    if (wasFollowing) {
+                        root.followOutput = true
                         scrollToEnd.restart()
+                    }
                     if (firstFrame) root.fullRefresh()
                 } catch (error) { root.statusText = "Terminal frame was invalid" }
                 if (!root.hasTerminalFrame) root.changed(1)
@@ -183,6 +225,8 @@ Rectangle {
                 root.connectionPending = false
                 root.hasTerminalFrame = false
                 root.terminalText = ""
+                root.cursorVisible = false
+                root.followOutput = true
                 root.statusText = contents
                 root.changed(2)
             }
@@ -203,7 +247,34 @@ Rectangle {
     }
     Timer {
         id: scrollToEnd; interval: 1; repeat: false
-        onTriggered: terminalFlick.contentY = Math.max(0, terminalFlick.contentHeight - terminalFlick.height)
+        onTriggered: {
+            terminalFlick.contentY = Math.max(0, terminalFlick.contentHeight - terminalFlick.height)
+            root.followOutput = true
+        }
+    }
+    Timer {
+        id: geometryUpdate
+        interval: 80
+        repeat: false
+        onTriggered: {
+            if (!root.sessionActive || terminalFlick.width <= 0 || terminalFlick.height <= 0) return
+            var cellWidth = Math.max(1, terminalCellProbe.implicitWidth)
+            var cellHeight = Math.max(1, terminalCellProbe.implicitHeight)
+            var columns = Math.max(40, Math.min(160, Math.floor(terminalFlick.width / cellWidth)))
+            var rows = Math.max(10, Math.min(60, Math.floor(terminalFlick.height / cellHeight)))
+            if (rows === root.terminalRows && columns === root.terminalCols) return
+            root.terminalRows = rows
+            root.terminalCols = columns
+            endpoint.sendMessage(4, JSON.stringify({rows: rows, cols: columns}))
+            root.followOutput = true
+            scrollToEnd.restart()
+        }
+    }
+    Timer {
+        id: clearScreenRefresh
+        interval: 220
+        repeat: false
+        onTriggered: root.fullRefresh()
     }
 
     Rectangle {
@@ -241,7 +312,16 @@ Rectangle {
                 width: 132 * unit; height: 42 * unit
                 color: soft; border.color: ink; radius: 2 * unit
                 Text { anchors.centerIn: parent; text: root.keyboardVisible ? "HIDE KEYS" : "SHOW KEYS"; color: ink; font.pixelSize: 15 * unit; font.bold: true }
-                MouseArea { anchors.fill: parent; onClicked: { root.keyboardVisible = !root.keyboardVisible; root.changed(2) } }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        root.keyboardVisible = !root.keyboardVisible
+                        root.followOutput = true
+                        geometryUpdate.restart()
+                        scrollToEnd.restart()
+                        root.changed(2)
+                    }
+                }
             }
             Rectangle {
                 width: 82 * unit; height: 42 * unit
@@ -322,9 +402,15 @@ Rectangle {
                     anchors.fill: parent
                     anchors.margins: 24 * unit
                     contentWidth: width
-                    contentHeight: Math.max(height, terminalOutput.paintedHeight + 20 * unit)
+                    contentHeight: Math.max(height, terminalOutput.paintedHeight,
+                        (root.cursorRow + 1) * terminalCellProbe.implicitHeight + 4 * unit)
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
+                    flickableDirection: Flickable.VerticalFlick
+                    onWidthChanged: geometryUpdate.restart()
+                    onHeightChanged: geometryUpdate.restart()
+                    onMovementStarted: root.followOutput = false
+                    onMovementEnded: root.followOutput = atYEnd
                     Text {
                         id: terminalOutput
                         width: terminalFlick.width
@@ -333,8 +419,21 @@ Rectangle {
                         font.family: terminalFont.name.length ? terminalFont.name : "NotoMono Nerd Font Mono"
                         font.pixelSize: 22 * unit
                         font.hintingPreference: Font.PreferNoHinting
+                        lineHeightMode: Text.FixedHeight
+                        lineHeight: terminalCellProbe.implicitHeight
                         textFormat: Text.PlainText
                         wrapMode: Text.NoWrap
+                    }
+                    Rectangle {
+                        id: terminalCursor
+                        visible: root.cursorVisible && root.hasTerminalFrame
+                        x: Math.min(terminalFlick.width - width,
+                            root.cursorCol * terminalCellProbe.implicitWidth)
+                        y: root.cursorRow * terminalCellProbe.implicitHeight
+                        width: Math.max(2 * unit, terminalCellProbe.implicitWidth)
+                        height: Math.max(2 * unit, terminalCellProbe.implicitHeight)
+                        color: ink
+                        z: 2
                     }
                     Column {
                         visible: root.connectionPending && !root.hasTerminalFrame

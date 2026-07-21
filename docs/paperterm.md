@@ -20,6 +20,15 @@ PaperTerm currently favors a responsive plain-text frame over per-cell color
 and weight styling; rich-text rendering proved too slow and unreliable on the
 tablet.
 
+The terminal reports the visible viewport to the remote PTY instead of using a
+fixed terminal size. Hiding the on-screen keyboard therefore adds terminal
+rows, and showing it reduces the remote terminal to the unobscured area. Width
+changes similarly renegotiate the column count. Live output follows the prompt
+at the bottom; dragging upward disengages that follow mode until the view is
+returned to the bottom. The solid cursor does not blink, which avoids needless
+e-ink updates. `Ctrl+L` returns to the live cleared viewport while retaining
+in-memory scrollback above it.
+
 The on-screen keyboard includes Escape, modifiers, Tab, Backspace, Enter,
 Home, End, Delete, Page Up, Page Down, and all four arrow keys. A physical
 keyboard can send the same navigation keys.

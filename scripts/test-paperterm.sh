@@ -109,6 +109,16 @@ grep -Fq 'vterm_keyboard_unichar(terminal, '\'' '\'', modifiers)' "$ROOT/src/pap
   || die 'the backend does not encode modified Space through libvterm'
 grep -Fq 'self_test_output[0] == 0' "$ROOT/src/paperterm/backend/paperterm-backend.c" \
   || die 'the backend self-test does not verify the tmux NUL prefix'
+grep -Fq 'endpoint.sendMessage(4, JSON.stringify({rows: rows, cols: columns}))' "$ROOT/src/paperterm/qml/Main.qml" \
+  || die 'the frontend does not resize the PTY to the visible terminal viewport'
+grep -Fq 'onHeightChanged: geometryUpdate.restart()' "$ROOT/src/paperterm/qml/Main.qml" \
+  || die 'hiding the keyboard does not renegotiate terminal height'
+grep -Fq 'id: terminalCursor' "$ROOT/src/paperterm/qml/Main.qml" \
+  || die 'the live terminal cursor is not rendered'
+grep -Fq 'property bool followOutput: true' "$ROOT/src/paperterm/qml/Main.qml" \
+  || die 'live output does not have an explicit bottom-follow state'
+grep -Fq 'onMovementStarted: root.followOutput = false' "$ROOT/src/paperterm/qml/Main.qml" \
+  || die 'manual scroll cannot disengage live bottom-follow'
 grep -Fq 'value.macros.length > 6' "$ROOT/scripts/configure-paperterm.sh" \
   || die 'macro configuration is not bounded by the trusted-host validator'
 bash -n "$ROOT/scripts/authorize-paperterm-key.sh"
