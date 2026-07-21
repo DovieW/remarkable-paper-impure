@@ -483,7 +483,7 @@ Rectangle {
                         x: Math.min(terminalFlick.width - width,
                             root.cursorCol * terminalCellProbe.implicitWidth)
                         y: root.cursorRow * terminalCellProbe.implicitHeight
-                        width: Math.max(2 * unit, terminalCellProbe.implicitWidth)
+                        width: Math.max(2, 2 * unit)
                         height: Math.max(2 * unit, terminalCellProbe.implicitHeight)
                         color: ink
                         z: 2

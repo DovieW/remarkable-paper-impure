@@ -121,6 +121,11 @@ grep -Fq 'onHeightChanged: geometryUpdate.restart()' "$ROOT/src/paperterm/qml/Ma
   || die 'hiding the keyboard does not renegotiate terminal height'
 grep -Fq 'id: terminalCursor' "$ROOT/src/paperterm/qml/Main.qml" \
   || die 'the live terminal cursor is not rendered'
+grep -Fq 'width: Math.max(2, 2 * unit)' "$ROOT/src/paperterm/qml/Main.qml" \
+  || die 'the terminal cursor must be a thin non-blinking vertical line'
+! grep -Eq 'Animation|Timer' <(sed -n '/id: terminalCursor/,/^[[:space:]]*}/p' \
+    "$ROOT/src/paperterm/qml/Main.qml") \
+  || die 'the terminal cursor must not blink'
 grep -Fq 'property bool followOutput: true' "$ROOT/src/paperterm/qml/Main.qml" \
   || die 'live output does not have an explicit bottom-follow state'
 grep -Fq 'onMovementStarted: root.followOutput = false' "$ROOT/src/paperterm/qml/Main.qml" \
