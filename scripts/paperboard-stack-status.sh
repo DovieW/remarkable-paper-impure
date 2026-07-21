@@ -136,7 +136,7 @@ fi
 
 printf '%s\n' '[Relay acknowledgement]'
 if [[ -f $client_env && ! -L $client_env && -r $client_env ]]; then
-  # shellcheck disable=SC1090 -- this is an operator-selected ignored env file.
+  # shellcheck disable=SC1090
   if status="$( (set -a; source "$client_env"; set +a; curl -fsS --max-time 10 -H "Authorization: Bearer $PAPERBOARD_TOKEN" "${PAPERBOARD_URL%/}/v2/devices/$PAPERBOARD_DEVICE/status") )" 2>/dev/null \
     && jq -e '.online == true and (.last_ack_cursor | type == "number") and (.cursor | type == "number")' >/dev/null <<<"$status"; then
     pass 'tablet heartbeat is recent and acknowledgement state is readable'

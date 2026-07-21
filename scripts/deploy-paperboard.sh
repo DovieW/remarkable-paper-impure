@@ -20,7 +20,8 @@ Deploy a built Paperboard QML bundle to AppLoad on Paper Pure.
 Usage: deploy-paperboard.sh [--host HOST] [--bundle DIRECTORY] [--no-restart-xovi] [--no-activate] [--dry-run]
 
 The managed Xovi UI services restart by default so AppLoad cannot retain an
-older QML frontend. Use --no-restart-xovi only for a backend-only release.
+older QML frontend. An actual deployment creates and verifies a backup first.
+Use --no-restart-xovi only for a backend-only release.
 EOF
 }
 
@@ -92,16 +93,24 @@ IFS='|' read -r device_hostname architecture image_version <<< "$identity"
 node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if (!data.approved_os[process.argv[2]]) process.exit(1)' \
   "$compatibility_manifest" "$image_version" || die "OS $image_version is not approved in config/compatibility.json"
 
-release_id="$(sha256sum "$manifest" "$resources" "$backend" "$icon" | sha256sum | cut -c1-16)"
+release_id="$({
+  sha256sum "$manifest" | cut -d' ' -f1
+  sha256sum "$resources" | cut -d' ' -f1
+  sha256sum "$backend" | cut -d' ' -f1
+  sha256sum "$icon" | cut -d' ' -f1
+} | sha256sum | cut -c1-16)"
 
 printf 'Target: %s (%s, OS %s)\n' "$device_hostname" "$architecture" "$image_version"
 printf 'Bundle: %s\n' "$bundle_directory"
 printf 'Release: %s\n' "$release_id"
 
 if $dry_run; then
+  "$REPOSITORY_ROOT/scripts/backup.sh" --host "$host" --dry-run
   printf 'Dry run complete: no tablet files or services were changed.\n'
   exit 0
 fi
+
+"$REPOSITORY_ROOT/scripts/backup.sh" --host "$host"
 
 remote_stage="/home/root/.paperboard-stage.$$"
 ssh "${ssh_options[@]}" "$host" sh -s -- "$remote_stage" <<'REMOTE'
@@ -183,6 +192,10 @@ fi
 
 if $activate; then
   printf 'Paperboard deployed and activated transactionally.\n'
+  activation=foreground
 else
   printf 'Paperboard deployed transactionally without changing the foreground app.\n'
+  activation=unchanged
 fi
+"$REPOSITORY_ROOT/scripts/deployment-summary.sh" --host "$host" --app paperboard \
+  --release "$release_id" --os "$image_version" --activation "$activation"

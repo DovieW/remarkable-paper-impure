@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly ROOT
+
+usage() {
+  cat <<'EOF'
+Paper Pure repository command center
+
+Usage: scripts/remarkable COMMAND [TARGET] [OPTIONS]
+
+Device:
+  status [options]                Show tablet identity and services
+  backup [options]                Create and verify a user-data backup
+  doctor [options]                Check SSH, compatibility, and companion state
+  smoke-test [options]            Verify installed apps without launching them
+
+Applications:
+  build paperboard|paperterm|all  Build tablet application bundles
+  deploy paperboard|paperterm     Back up and transactionally deploy one app
+  package [options]               Create checksummed runtime archives
+
+Repository:
+  check host|release              Run host-only or complete local release gates
+  scan                            Scan files and Git history for secret patterns
+
+Run the underlying command with --help for its detailed options. PaperTerm is
+never remotely launched; deployment only installs it for physical selection.
+EOF
+}
+
+command_name="${1:-help}"
+shift || true
+case "$command_name" in
+  status) exec "$ROOT/scripts/status.sh" "$@" ;;
+  backup) exec "$ROOT/scripts/backup.sh" "$@" ;;
+  doctor) exec "$ROOT/scripts/paperboard-doctor.sh" "$@" ;;
+  smoke-test) exec "$ROOT/scripts/device-smoke-test.sh" "$@" ;;
+  build)
+    target="${1:-}"; [[ -n "$target" ]] || { usage >&2; exit 2; }; shift
+    case "$target" in
+      paperboard) exec "$ROOT/scripts/build-paperboard.sh" "$@" ;;
+      paperterm) exec "$ROOT/scripts/build-paperterm.sh" "$@" ;;
+      all) "$ROOT/scripts/build-paperboard.sh" "$@"; exec "$ROOT/scripts/build-paperterm.sh" "$@" ;;
+      *) printf 'remarkable: unknown build target: %s\n' "$target" >&2; exit 2 ;;
+    esac
+    ;;
+  deploy)
+    target="${1:-}"; [[ -n "$target" ]] || { usage >&2; exit 2; }; shift
+    case "$target" in
+      paperboard) exec "$ROOT/scripts/deploy-paperboard.sh" "$@" ;;
+      paperterm) exec "$ROOT/scripts/deploy-paperterm.sh" "$@" ;;
+      *) printf 'remarkable: deploy one app at a time: paperboard or paperterm\n' >&2; exit 2 ;;
+    esac
+    ;;
+  package) exec "$ROOT/scripts/package-tablet-apps.sh" "$@" ;;
+  check)
+    target="${1:-host}"; shift || true
+    case "$target" in
+      host) exec "$ROOT/scripts/host-check.sh" "$@" ;;
+      release) exec "$ROOT/scripts/release-check.sh" "$@" ;;
+      *) printf 'remarkable: check target must be host or release\n' >&2; exit 2 ;;
+    esac
+    ;;
+  scan) exec "$ROOT/scripts/scan-repository.sh" "$@" ;;
+  help|-h|--help) usage ;;
+  *) printf 'remarkable: unknown command: %s\n' "$command_name" >&2; usage >&2; exit 2 ;;
+esac

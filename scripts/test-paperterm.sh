@@ -8,6 +8,9 @@ readonly ROOT
 sdk_root="${REMARKABLE_SDK_ROOT:-$HOME/.local/share/remarkable-sdk/tatsu-3.27.0.97}"
 
 die() { printf '%s: %s\n' "$PROGRAM_NAME" "$*" >&2; exit 1; }
+filter_qt_locale_warning() {
+  sed '/^Detected locale "C" with character encoding "ANSI_X3.4-1968"/,/^for more information\.$/d' >&2
+}
 
 "$ROOT/scripts/build-paperterm.sh"
 bundle="${PAPERTERM_BUILD_DIR:-$ROOT/build/paperterm-tatsu}"
@@ -23,7 +26,7 @@ mapfile -t environment_files < <(find "$sdk_root" -maxdepth 1 -type f -name 'env
   # shellcheck disable=SC1090
   source "${environment_files[0]}"
   export LANG=C.utf8 LC_ALL=C.utf8
-qmlformat "$ROOT/src/paperterm/qml/Main.qml" >/dev/null
+qmlformat "$ROOT/src/paperterm/qml/Main.qml" >/dev/null 2> >(filter_qt_locale_warning)
 )
 ! grep -Fq 'GhostBuster {' "$ROOT/src/paperterm/qml/Main.qml" \
   || die 'GhostBuster is an injected context object and must not be instantiated'

@@ -28,6 +28,9 @@ EOF
 }
 
 die() { printf '%s: %s\n' "$PROGRAM_NAME" "$*" >&2; exit 1; }
+filter_qt_locale_warning() {
+  sed '/^Detected locale "C" with character encoding "ANSI_X3.4-1968"/,/^for more information\.$/d' >&2
+}
 
 while (($#)); do
   case "$1" in
@@ -46,6 +49,8 @@ command -v perl >/dev/null || die "perl is required to generate libvterm encodin
 rsvg_binary="$(command -v rsvg-convert)" || die "rsvg-convert is required to render the AppLoad icon"
 command -v sha256sum >/dev/null || die "sha256sum is required"
 command -v tar >/dev/null || die "tar is required"
+export LANG=C.utf8
+export LC_ALL=C.utf8
 
 if $clean; then rm -rf "$build_directory"; fi
 if [[ ! -d "$dependency_directory/.git" ]]; then
@@ -86,8 +91,6 @@ done
 
 # shellcheck disable=SC1090
 source "${environment_files[0]}"
-export LANG=C.utf8
-export LC_ALL=C.utf8
 rcc_binary="$OECORE_NATIVE_SYSROOT/usr/libexec/rcc"
 [[ -x "$rcc_binary" ]] || die "Qt resource compiler not found after SDK activation"
 
@@ -96,7 +99,8 @@ mkdir -p "$build_directory/fonts"
 mkdir -p "$build_directory/objects"
 (
   cd "$REPOSITORY_ROOT/src/paperterm"
-  "$rcc_binary" --binary -o "$build_directory/resources.rcc" application.qrc
+  "$rcc_binary" --binary -o "$build_directory/resources.rcc" application.qrc \
+    2> >(filter_qt_locale_warning)
 )
 cp "$REPOSITORY_ROOT/src/paperterm/packaging/manifest.json" "$build_directory/manifest.json"
 "$rsvg_binary" --width 100 --height 100 \
@@ -121,7 +125,9 @@ app_object="$build_directory/objects/paperterm-backend.o"
 libvterm_objects=()
 for source in "${libvterm_sources[@]}"; do
   object="$build_directory/objects/libvterm-$(basename "${source%.c}").o"
-  "${compiler[@]}" -c -std=c99 -Os -Wall -Wpedantic \
+  # The pinned third-party source triggers two GCC flow-analysis warnings;
+  # our own backend remains compiled separately with -Werror above.
+  "${compiler[@]}" -c -std=c99 -Os -Wall -Wpedantic -Wno-maybe-uninitialized \
     -I"$dependency_directory/include" -I"$dependency_directory/src" \
     "$source" -o "$object"
   libvterm_objects+=("$object")

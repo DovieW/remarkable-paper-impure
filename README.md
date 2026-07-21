@@ -100,16 +100,22 @@ tracked examples.
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm check
-pnpm test
-scripts/build-paperboard.sh --clean
-scripts/test-paperterm.sh
-scripts/release-check.sh
+scripts/remarkable check host
+scripts/remarkable check release
 ```
 
-There is deliberately no public CI pipeline for device deployment. The manual
-release check validates shell scripts, the v2 contract, TypeScript, tests, QML
-bundle construction, formatting, and tracked/history secret patterns.
+The command center also exposes the routine device and application workflows:
+
+```bash
+scripts/remarkable status --host remarkable-usb
+scripts/remarkable smoke-test --host remarkable-usb
+scripts/remarkable build all --clean
+scripts/remarkable package --version 2.1.0 --skip-build
+```
+
+GitHub CI runs only `scripts/remarkable check host`. It has no tablet, NAS,
+tailnet, or deployment credentials. Physical-device deployment remains a
+manual operation after the complete local release gate passes.
 
 Key guides:
 

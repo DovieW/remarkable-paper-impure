@@ -106,3 +106,5 @@ if test "$restart_xovi" = true; then /home/root/xovi/start; fi
 REMOTE
 trap - EXIT INT TERM
 printf 'PaperTerm installed. Open it physically from AppLoad when ready.\n'
+"$REPOSITORY_ROOT/scripts/deployment-summary.sh" --host "$host" --app paperterm \
+  --release "$release_id" --os "$os_version" --activation physical-only

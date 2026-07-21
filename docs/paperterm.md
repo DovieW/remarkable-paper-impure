@@ -90,6 +90,14 @@ Build:
 scripts/build-paperterm.sh --clean
 ```
 
+For a checksummed runtime archive that another agent can install without
+shipping SDK object files, build both applications and package them:
+
+```bash
+scripts/remarkable build all --clean
+scripts/remarkable package --version VERSION --skip-build
+```
+
 The first build downloads the pinned libvterm source, verifies its exact Git
 commit, and cross-compiles it with the official Paper Pure SDK. Subsequent
 builds reuse the inspected checkout under the ignored `build/` directory.
@@ -123,6 +131,7 @@ Install or update:
 scripts/backup.sh --host remarkable-usb
 scripts/deploy-paperterm.sh --host remarkable-usb
 scripts/configure-paperterm.sh --host remarkable-usb --config config/paperterm-profiles.local.json
+scripts/device-smoke-test.sh --host remarkable-usb
 ```
 
 Disable by exiting the application. Remove the bundle while retaining private
