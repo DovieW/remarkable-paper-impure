@@ -35,6 +35,10 @@ while (($#)); do
   esac
 done
 
+if $restart_xovi && ! $dry_run && [[ "$host" != remarkable-usb ]]; then
+  die 'Xovi/AppLoad restarts require --host remarkable-usb; use --no-restart-xovi only for a verified backend-only update'
+fi
+
 manifest="$bundle_directory/manifest.json"
 resources="$bundle_directory/resources.rcc"
 backend="$bundle_directory/backend/entry"
@@ -78,11 +82,10 @@ scp "${ssh_options[@]}" "$manifest" "$resources" "$icon" "$license" "$nerd_font_
 scp "${ssh_options[@]}" "$backend" "$host:$remote_stage/backend/entry"
 scp "${ssh_options[@]}" "$nerd_font" "$host:$remote_stage/fonts/NotoMonoNerdFontMono-Regular.ttf"
 
-ssh "${ssh_options[@]}" "$host" sh -s -- "$remote_stage" "$release_id" "$restart_xovi" <<'REMOTE'
+ssh "${ssh_options[@]}" "$host" sh -s -- "$remote_stage" "$release_id" <<'REMOTE'
 set -eu
 stage=$1
 release_id=$2
-restart_xovi=$3
 test "$(hostname)" = imx93-tatsu
 chmod 644 "$stage/icon.png" "$stage/manifest.json" "$stage/resources.rcc" "$stage/LICENSE.libvterm" \
   "$stage/LICENSE.nerd-fonts.txt" "$stage/fonts/NotoMonoNerdFontMono-Regular.ttf"
@@ -102,9 +105,11 @@ if test -d /home/root/xovi/exthome/appload/paperterm; then
 fi
 mv "$stage" /home/root/xovi/exthome/appload/paperterm
 printf '%s\n' "$release_id" > /home/root/.local/share/paperterm/current-release
-if test "$restart_xovi" = true; then /home/root/xovi/start; fi
 REMOTE
 trap - EXIT INT TERM
+if $restart_xovi; then
+  "$REPOSITORY_ROOT/scripts/restart-appload-runtime.sh" --host "$host"
+fi
 printf 'PaperTerm installed. Open it physically from AppLoad when ready.\n'
 "$REPOSITORY_ROOT/scripts/deployment-summary.sh" --host "$host" --app paperterm \
   --release "$release_id" --os "$os_version" --activation physical-only

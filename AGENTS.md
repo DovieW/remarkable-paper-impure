@@ -35,6 +35,13 @@ Read this file completely before interacting with a tablet.
     tokens or private tailnet hostnames. Source ignored files in a subshell.
 12. Never enable Tailscale Funnel or expose relay/admin ports publicly. The
     admin listener must remain on host loopback.
+13. After every tablet-changing step, wait for the UI to settle and verify the
+    runtime invariant before continuing: `xochitl` is active, its process is
+    Xovi-injected, the Xovi message broker exists, AppLoad applications remain
+    installed, and the root filesystem is read-only. A successful file copy is
+    not a successful deployment. Repair or roll back immediately if this check
+    fails. Restart Xovi/AppLoad only through physical USB so a network-service
+    failure cannot remove the recovery path.
 
 ## Trust order
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 host=remarkable-usb
 purge_data=false
 dry_run=false
@@ -41,6 +42,8 @@ if $dry_run; then
   exit 0
 fi
 
+"$root/scripts/backup.sh" --host "$host"
+
 ssh "${ssh_options[@]}" "$host" sh -s -- "$purge_data" <<'REMOTE'
 set -eu
 purge_data=$1
@@ -53,4 +56,6 @@ if test "$purge_data" = true; then
   rm -rf /home/root/.config/paperboard /home/root/.local/share/paperboard
 fi
 REMOTE
+"$root/scripts/verify-appload-runtime.sh" --host "$host" --wait 0 \
+  --allow-missing-app paperboard
 printf 'Paperboard removed. Use Reload in AppLoad to update the launcher.\n'

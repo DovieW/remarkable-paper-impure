@@ -13,6 +13,10 @@ while (($#)); do
     *) printf 'rollback-paperboard.sh: unknown argument: %s\n' "$1" >&2; exit 2 ;;
   esac
 done
+if $activate && ! $dry_run && [[ "$host" != remarkable-usb ]]; then
+  echo 'rollback-paperboard.sh: Xovi/AppLoad activation requires --host remarkable-usb' >&2
+  exit 1
+fi
 identity=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$host" 'printf "%s|%s|" "$(hostname)" "$(uname -m)"; sed -n '\''s/^IMG_VERSION="\(.*\)"/\1/p'\'' /etc/os-release')
 IFS='|' read -r platform architecture os_version <<<"$identity"
 [[ $platform == imx93-tatsu && $architecture == aarch64 ]] || { echo 'rollback-paperboard.sh: target is not a Paper Pure' >&2; exit 1; }
@@ -23,6 +27,7 @@ if $dry_run; then
   echo 'Rollback dry run complete: target and previous deployment are ready.'
   exit 0
 fi
+"$root/scripts/backup.sh" --host "$host"
 ssh -o BatchMode=yes -o ConnectTimeout=10 "$host" sh -s <<'REMOTE'
 set -eu
 current=/home/root/xovi/exthome/appload/paperboard
@@ -38,8 +43,10 @@ if test -d /home/root/.local/share/paperboard/deployment-previous-2; then
 fi
 REMOTE
 if $activate; then
-  ssh -o BatchMode=yes -o ConnectTimeout=10 "$host" /home/root/xovi/start
+  "$root/scripts/restart-appload-runtime.sh" --host "$host"
   sleep 15
   REMARKABLE_HOST="$host" "$root/scripts/tablet-companion.sh" launch paperboard >/dev/null
+else
+  "$root/scripts/verify-appload-runtime.sh" --host "$host" --wait 0
 fi
 printf 'Paperboard rolled back on %s.\n' "$host"

@@ -11,6 +11,10 @@ while (($#)); do
     *) echo "rollback-paperterm.sh: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+if ! $dry_run && [[ "$host" != remarkable-usb ]]; then
+  echo 'rollback-paperterm.sh: Xovi/AppLoad rollback requires --host remarkable-usb' >&2
+  exit 1
+fi
 identity="$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$host" 'printf "%s|%s|" "$(hostname)" "$(uname -m)"; sed -n '\''s/^IMG_VERSION="\(.*\)"/\1/p'\'' /etc/os-release')"
 IFS='|' read -r platform architecture os_version <<< "$identity"
 [[ "$platform" == imx93-tatsu && "$architecture" == aarch64 ]] || { echo 'rollback-paperterm.sh: target is not a Paper Pure' >&2; exit 1; }
@@ -20,6 +24,7 @@ if $dry_run; then
   echo 'PaperTerm rollback dry run passed.'
   exit 0
 fi
+"$root/scripts/backup.sh" --host "$host"
 ssh -o BatchMode=yes -o ConnectTimeout=10 "$host" sh -s <<'REMOTE'
 set -eu
 current=/home/root/xovi/exthome/appload/paperterm
@@ -32,6 +37,6 @@ rm -rf "$failed"
 if test -s /home/root/.local/share/paperterm/deployment-previous-release; then
   mv /home/root/.local/share/paperterm/deployment-previous-release /home/root/.local/share/paperterm/current-release
 fi
-/home/root/xovi/start
 REMOTE
+"$root/scripts/restart-appload-runtime.sh" --host "$host"
 echo 'PaperTerm rolled back. Open it physically from AppLoad to verify.'

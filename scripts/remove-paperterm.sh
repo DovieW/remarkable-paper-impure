@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 host="${REMARKABLE_HOST:-remarkable-usb}"
 purge_data=false
 dry_run=false
@@ -13,6 +14,9 @@ while (($#)); do
     *) die "unknown argument: $1" ;;
   esac
 done
+if ! $dry_run && [[ "$host" != remarkable-usb ]]; then
+  die 'PaperTerm removal requires --host remarkable-usb because AppLoad must restart'
+fi
 identity="$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$host" 'printf "%s|%s" "$(hostname)" "$(uname -m)"')"
 [[ "$identity" == "imx93-tatsu|aarch64" ]] || die 'target is not a Paper Pure'
 if $dry_run; then
@@ -20,6 +24,7 @@ if $dry_run; then
   $purge_data && echo 'Would also permanently remove profiles, key, and rollback data.'
   exit 0
 fi
+"$root/scripts/backup.sh" --host "$host"
 ssh -o BatchMode=yes -o ConnectTimeout=10 "$host" sh -s -- "$purge_data" <<'REMOTE'
 set -eu
 purge=$1
@@ -32,6 +37,6 @@ if test "$purge" = true; then
   rm -rf /home/root/.config/paperterm /home/root/.local/share/paperterm
   rm -f /home/root/.ssh/paperterm_ed25519
 fi
-/home/root/xovi/start
 REMOTE
+"$root/scripts/restart-appload-runtime.sh" --host "$host" --allow-missing-app paperterm
 echo 'PaperTerm removed.'

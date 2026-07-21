@@ -115,3 +115,19 @@ injection, continuous unattended control, or recovery-mode automation.
 4. Re-enable Auto sleep if it was relaxed.
 5. Lock the tablet.
 6. Commit only sanitized, reusable tooling and documentation.
+
+## Mandatory post-change invariant
+
+After every command that changes tablet files, packages, services, or custom
+applications, allow the UI to settle and run:
+
+```bash
+scripts/verify-appload-runtime.sh --host remarkable-usb
+```
+
+Do not batch a second change behind an unverified first change. The check must
+confirm that `xochitl` is active through Xovi, the Xovi message broker exists,
+Paperboard and PaperTerm remain registered under AppLoad, and `/` remains
+read-only. A copied bundle or successful backend self-test is not sufficient.
+Xovi/AppLoad restarts require physical USB so that Wi-Fi or Tailscale failure
+cannot remove the repair path.

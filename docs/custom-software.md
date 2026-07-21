@@ -92,7 +92,7 @@ mounted read-only, and `xochitl` should be active.
 Disable Xovi/AppLoad without uninstalling packages:
 
 ```bash
-ssh remarkable /home/root/xovi/stock
+ssh remarkable-usb /home/root/xovi/stock
 ```
 
 Wait at least 15 seconds and confirm the stock UI is responsive before another
@@ -101,22 +101,22 @@ mode change.
 Re-enable it:
 
 ```bash
-ssh remarkable /home/root/xovi/start
+scripts/restart-appload-runtime.sh --host remarkable-usb
 ```
 
 These scripts restart `xochitl`. Save or close active documents first. Do not
 run `stock` and `start` back-to-back: rapid restarts can trip systemd's
 `start-limit-hit` protection and cause the tablet to reboot into safe stock
-mode. If that happens, let the reboot finish, then run:
+mode. If that happens, let the reboot finish, connect physical USB, then run:
 
 ```bash
-ssh remarkable-usb \
-  'systemctl reset-failed xochitl.service; /home/root/xovi/start'
+scripts/recover-appload-runtime.sh
 ```
 
-Allow at least 15 seconds for the UI and network services to settle afterward.
-This recovery was tested successfully, and AppLoad returned with the root
-filesystem read-only.
+The helpers schedule the restart outside the SSH session and do not report
+success until a new Xovi-injected `xochitl` process, AppLoad broker, installed
+applications, and read-only root filesystem are verified. Never invoke
+`/home/root/xovi/start` directly from an SSH deployment or maintenance script.
 
 ## Updates
 
@@ -150,7 +150,7 @@ ssh remarkable '/home/root/.vellum/bin/vellum del koreader'
 Refresh AppLoad afterward by restarting Xovi:
 
 ```bash
-ssh remarkable /home/root/xovi/start
+scripts/restart-appload-runtime.sh --host remarkable-usb
 ```
 
 Before removing AppLoad or Vellum, return to the stock UI:

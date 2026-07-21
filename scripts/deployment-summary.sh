@@ -36,6 +36,9 @@ done
 [[ "$release" =~ ^[0-9a-f]{16}$ ]] || die "--release must be a 16-character content ID"
 [[ -n "$os_version" && -n "$activation" ]] || die "--os and --activation are required"
 
+"$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/verify-appload-runtime.sh" \
+  --host "$host" --wait 0
+
 rollback="$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$host" sh -s -- "$app" "$release" <<'REMOTE'
 set -eu
 app=$1

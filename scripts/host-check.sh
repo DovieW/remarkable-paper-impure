@@ -46,6 +46,20 @@ NODE
 grep -Fq 'interval: 60 * 60 * 1000' src/paperboard/qml/Main.qml
 grep -Fq 'paperboard admin provider set' scripts/configure-paperboard-trmnl-hosted.sh
 grep -Fq 'paperboard admin provider set' scripts/configure-paperboard-terminus-local.sh
+
+# A synchronous Xovi restart can tear down the SSH session and strand the
+# tablet in stock mode. Keep the one reviewed, detached USB restart boundary.
+xovi_start_path='/home/root/xovi/'"start"
+mapfile -t xovi_start_callers < <(rg -F -l "$xovi_start_path" scripts)
+if [[ "${#xovi_start_callers[@]}" -ne 1 \
+  || "${xovi_start_callers[0]}" != scripts/restart-appload-runtime.sh ]]; then
+  printf 'host-check.sh: direct Xovi restart escaped the USB safety helper\n' >&2
+  printf '  %s\n' "${xovi_start_callers[@]}" >&2
+  exit 1
+fi
+grep -Fq 'restart-appload-runtime.sh' scripts/deploy-paperboard.sh
+grep -Fq 'restart-appload-runtime.sh' scripts/deploy-paperterm.sh
+grep -Fq 'verify-appload-runtime.sh' scripts/deployment-summary.sh
 scripts/scan-repository.sh
 git diff --check
 

@@ -16,6 +16,7 @@ Device:
   backup [options]                Create and verify a user-data backup
   doctor [options]                Check SSH, compatibility, and companion state
   smoke-test [options]            Verify installed apps without launching them
+  runtime verify|restart|recover  Check or safely restore Xovi/AppLoad over USB
 
 Applications:
   build paperboard|paperterm|all  Build tablet application bundles
@@ -38,6 +39,15 @@ case "$command_name" in
   backup) exec "$ROOT/scripts/backup.sh" "$@" ;;
   doctor) exec "$ROOT/scripts/paperboard-doctor.sh" "$@" ;;
   smoke-test) exec "$ROOT/scripts/device-smoke-test.sh" "$@" ;;
+  runtime)
+    target="${1:-verify}"; shift || true
+    case "$target" in
+      verify) exec "$ROOT/scripts/verify-appload-runtime.sh" "$@" ;;
+      restart) exec "$ROOT/scripts/restart-appload-runtime.sh" "$@" ;;
+      recover) exec "$ROOT/scripts/recover-appload-runtime.sh" "$@" ;;
+      *) printf 'remarkable: runtime target must be verify, restart, or recover\n' >&2; exit 2 ;;
+    esac
+    ;;
   build)
     target="${1:-}"; [[ -n "$target" ]] || { usage >&2; exit 2; }; shift
     case "$target" in

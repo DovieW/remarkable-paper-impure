@@ -44,6 +44,8 @@ IFS='|' read -r platform architecture os_version <<<"$identity"
 node -e 'const c=require(process.argv[1]); process.exit(c.approved_os[process.argv[2]] ? 0 : 1)' \
   "$ROOT/config/compatibility.json" "$os_version" || die "OS $os_version is not approved"
 
+"$ROOT/scripts/verify-appload-runtime.sh" --host "$host" --wait 0
+
 remote_status="$(ssh "${ssh_options[@]}" "$host" sh <<'REMOTE'
 set -eu
 app_root=/home/root/xovi/exthome/appload

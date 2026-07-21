@@ -68,6 +68,10 @@ while (($#)); do
   esac
 done
 
+if $restart_xovi && ! $dry_run && [[ "$host" != remarkable-usb ]]; then
+  die 'Xovi/AppLoad restarts require --host remarkable-usb; use --no-restart-xovi only for a verified backend-only update'
+fi
+
 manifest="$bundle_directory/manifest.json"
 resources="$bundle_directory/resources.rcc"
 backend="$bundle_directory/backend/entry"
@@ -134,11 +138,10 @@ scp "${ssh_options[@]}" "$resources" "$host:$remote_stage/resources.rcc"
 scp "${ssh_options[@]}" "$icon" "$host:$remote_stage/icon.png"
 scp "${ssh_options[@]}" "$backend" "$host:$remote_stage/backend/entry"
 
-ssh "${ssh_options[@]}" "$host" sh -s -- "$remote_stage" "$restart_xovi" "$release_id" <<'REMOTE'
+ssh "${ssh_options[@]}" "$host" sh -s -- "$remote_stage" "$release_id" <<'REMOTE'
 set -eu
 stage=$1
-restart_xovi=$2
-release_id=$3
+release_id=$2
 chmod 644 "$stage/icon.png" "$stage/manifest.json" "$stage/resources.rcc"
 chmod 700 "$stage/backend"
 chmod 755 "$stage/backend/entry"
@@ -159,11 +162,12 @@ if test -d /home/root/xovi/exthome/appload/paperboard; then
 fi
 mv "$stage" /home/root/xovi/exthome/appload/paperboard
 printf '%s\n' "$release_id" > /home/root/.local/share/paperboard/current-release
-if test "$restart_xovi" = true; then
-  /home/root/xovi/start
-fi
 REMOTE
 trap - EXIT INT TERM
+
+if $restart_xovi; then
+  "$REPOSITORY_ROOT/scripts/restart-appload-runtime.sh" --host "$host"
+fi
 
 if $activate; then
   if $restart_xovi; then
