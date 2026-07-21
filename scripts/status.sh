@@ -25,6 +25,29 @@ ssh -o BatchMode=yes -o ConnectTimeout=10 "$host" '
     systemctl is-active "$service" 2>/dev/null || true
   done
 
+  printf "%s\n" "[private-ssh]"
+  private_ssh=/home/root/.local/share/paperboard/tailscale
+  if test -f "$private_ssh/private-ssh-enabled"; then
+    echo installed=xovi-lifecycle
+    for service in paperboard-dropbear-loopback.service paperboard-tailscale.service \
+      paperboard-tailscale-serve.service paperboard-tailscale-health.timer; do
+      printf "%s=" "$service"
+      systemctl is-active "$service" 2>/dev/null || true
+    done
+    printf "tailnet="
+    status=$($private_ssh/current/tailscale \
+      --socket="$private_ssh/runtime/tailscaled.sock" status --json 2>/dev/null || true)
+    compact=$(printf "%s" "$status" | tr -d "[:space:]")
+    if printf "%s" "$compact" | grep -q "\"BackendState\":\"Running\"" && \
+       printf "%s" "$compact" | grep -q "\"Online\":true"; then
+      echo online
+    else
+      echo offline
+    fi
+  else
+    echo installed=no
+  fi
+
   printf "%s\n" "[xochitl-mode]"
   pid=$(systemctl show --property MainPID --value xochitl.service)
   if test -n "$pid" && test "$pid" != 0 && test -r "/proc/$pid/environ"; then
@@ -57,4 +80,3 @@ ssh -o BatchMode=yes -o ConnectTimeout=10 "$host" '
       | sort -u
   fi
 '
-

@@ -43,38 +43,42 @@ It does not enable Funnel. The relay profile continues to require the restricted
 control key and verifies the same host key pinned over physical USB. Run the
 start command again if the tablet joins a different Wi-Fi network, because the
 local forwarding target can change. This caveat applies only to manual mode;
-the boot-persistent configuration below uses a stable loopback target.
+the lifecycle-managed configuration below uses a stable loopback target.
 
-## Boot-persistent operation
+## Xovi-lifecycle-persistent operation
 
-The recommended unattended configuration uses a systemd-managed userspace
-daemon and a loopback-only Dropbear socket:
+The tablet root filesystem is read-only and `/etc` is backed by a volatile
+overlay. Custom units placed in `/etc/systemd/system` can therefore vanish when
+the runtime is rebuilt. The recommended configuration stores reviewed helpers
+in encrypted `/home`, starts transient systemd services through a persistent
+Xovi `post-start` hook, and checks them every minute:
 
 ```bash
-scripts/install-paperboard-tailscale-service.sh --host remarkable-tailnet --dry-run
-scripts/install-paperboard-tailscale-service.sh --host remarkable-tailnet
+scripts/install-paperboard-tailscale-service.sh --host remarkable-usb --dry-run
+scripts/install-paperboard-tailscale-service.sh --host remarkable-usb
 ```
 
 The stable loopback-only `127.0.0.1:2222` forwarding target removes the Wi-Fi
 DHCP dependency while avoiding reMarkable's interface-bound port 22 sockets.
-Tailscale reconnects when the active network changes, while its SOCKS proxy and
-Serve configuration remain local to the tablet. Verify with:
+Tailscale reconnects when the active network changes. If the daemon, loopback
+SSH listener, or Serve route fails, the health timer repairs the private route
+within about one minute. Verify with:
 
 ```bash
-ssh remarkable-tailnet 'systemctl is-active paperboard-tailscale.service paperboard-tailscale-serve.service dropbear-loopback.socket'
+scripts/verify-appload-runtime.sh --host remarkable-tailnet --wait 75
 ```
 
-Disable without removing the units:
-
-```bash
-ssh remarkable-tailnet 'systemctl disable --now paperboard-tailscale-serve.service paperboard-tailscale.service dropbear-loopback.socket'
-```
-
-Remove the units and return to manual startup:
+Remove the hook and transient services and return to manual startup:
 
 ```bash
 scripts/install-paperboard-tailscale-service.sh --host remarkable-tailnet --uninstall
 ```
+
+This is not a claim of unattended full-reboot persistence. On the tested Paper
+Pure stack, Xovi remains deliberately `tethered`: after a real tablet reboot,
+the owner may still need USB to start Xovi. Once Xovi starts, the hook restores
+private SSH automatically. Do not add boot integration without separately
+reviewing it against the current firmware and recovery path.
 
 ## Tailnet policy
 

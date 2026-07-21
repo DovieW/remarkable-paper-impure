@@ -32,9 +32,13 @@ pidfile="$runtime/tailscaled.pid"
 test -x "$binary" -a -x "$daemon" || { echo "Install Tailscale first." >&2; exit 1; }
 if systemctl is-active --quiet paperboard-tailscale.service 2>/dev/null; then
   if test "$serve_ssh" = true; then
-    systemctl restart paperboard-tailscale-serve.service
+    test -x "$base/private-ssh-activate" || {
+      echo "The lifecycle-managed private SSH helper is missing." >&2
+      exit 1
+    }
+    "$base/private-ssh-activate"
   fi
-  echo "The boot-persistent Paperboard Tailscale service is already active."
+  echo "The Xovi-lifecycle-managed Paperboard Tailscale service is already active."
   exit 0
 fi
 mkdir -p "$runtime"

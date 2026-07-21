@@ -161,6 +161,12 @@ The stack in [docs/custom-software.md](docs/custom-software.md) is an observed
 example for OS `3.27.3.0`, not a universal installer. Revalidate all package
 constraints and artifact hashes before reproducing it on another tablet.
 
+On the tested Paper Pure image, `/etc` is a volatile overlay. Do not treat
+custom files in `/etc/systemd/system` as durable. Lifecycle-managed services
+must keep their reviewed source under encrypted `/home` and be recreated by a
+documented Xovi hook. Xovi itself remains tethered unless boot integration has
+been explicitly reviewed and tested for the current firmware.
+
 ### 7. Paperboard handoff
 
 If the owner asks for agent output, TRMNL, Terminus, or a programmable display,

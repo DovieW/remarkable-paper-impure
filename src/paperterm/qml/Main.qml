@@ -19,10 +19,12 @@ Rectangle {
     property var macros: []
     property bool profilesLoaded: false
     property string notice: ""
+    property string connectionError: ""
     property string statusText: "Starting PaperTerm"
     property string terminalText: ""
     property bool sessionActive: false
     property bool connectionPending: false
+    property bool disconnectRequested: false
     property bool hasTerminalFrame: false
     property bool keyboardVisible: true
     property bool ctrlHeld: false
@@ -112,6 +114,8 @@ Rectangle {
     }
 
     function startProfile(id) {
+        connectionError = ""
+        disconnectRequested = false
         terminalText = ""
         hasTerminalFrame = false
         connectionPending = true
@@ -124,6 +128,8 @@ Rectangle {
     }
 
     function disconnectSession() {
+        connectionError = ""
+        disconnectRequested = true
         sessionActive = false
         connectionPending = false
         hasTerminalFrame = false
@@ -217,10 +223,13 @@ Rectangle {
                 root.changed(1)
             } else if (type === 104) {
                 root.statusText = contents
+                root.connectionError = contents
                 root.connectionPending = false
                 root.sessionActive = false
+                root.disconnectRequested = false
                 root.changed(1)
             } else if (type === 106) {
+                var openedShell = root.hasTerminalFrame
                 root.sessionActive = false
                 root.connectionPending = false
                 root.hasTerminalFrame = false
@@ -228,6 +237,10 @@ Rectangle {
                 root.cursorVisible = false
                 root.followOutput = true
                 root.statusText = contents
+                root.connectionError = root.disconnectRequested ? "" : (openedShell
+                    ? "The remote session ended."
+                    : "SSH could not open a shell. Check that the destination is online and allowed by Tailscale or SSH policy.")
+                root.disconnectRequested = false
                 root.changed(2)
             }
         }
@@ -351,6 +364,46 @@ Rectangle {
                 anchors.horizontalCenter: parent.horizontalCenter
                 topPadding: 40 * unit
                 spacing: 22 * unit
+                Rectangle {
+                    width: connectionColumn.width
+                    height: visible ? 96 * unit : 0
+                    visible: root.connectionError.length > 0 || root.notice.length > 0
+                    color: "#f1f1ec"
+                    border.color: ink
+                    border.width: 2 * unit
+                    radius: 3 * unit
+                    Text {
+                        anchors.left: parent.left
+                        anchors.right: dismissNotice.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.leftMargin: 24 * unit
+                        anchors.rightMargin: 18 * unit
+                        text: root.connectionError.length > 0 ? root.connectionError : root.notice
+                        color: ink
+                        font.family: "Noto Sans"
+                        font.pixelSize: 20 * unit
+                        wrapMode: Text.WordWrap
+                    }
+                    Text {
+                        id: dismissNotice
+                        anchors.right: parent.right
+                        anchors.rightMargin: 24 * unit
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "DISMISS"
+                        color: ink
+                        font.family: "Noto Sans Mono"
+                        font.pixelSize: 17 * unit
+                        font.bold: true
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            root.connectionError = ""
+                            root.notice = ""
+                            root.changed(1)
+                        }
+                    }
+                }
                 Repeater {
                     model: root.profiles
                     delegate: Rectangle {

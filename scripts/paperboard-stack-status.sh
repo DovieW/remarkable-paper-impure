@@ -123,15 +123,20 @@ fi
 
 if identity="$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$tablet_host" '
   set -eu
-  for unit in paperboard-tailscale.service paperboard-tailscale-serve.service dropbear-loopback.socket; do
+  base=/home/root/.local/share/paperboard/tailscale
+  test -f "$base/private-ssh-enabled"
+  test -x "$base/private-ssh-activate"
+  test -x "$base/private-ssh-health"
+  test -x /home/root/xovi/scripts/post-start/50-paperboard-private-ssh.sh
+  for unit in paperboard-dropbear-loopback.service paperboard-tailscale.service \
+    paperboard-tailscale-serve.service paperboard-tailscale-health.timer; do
     systemctl is-active --quiet "$unit"
-    systemctl is-enabled --quiet "$unit"
   done
   printf "%s|%s" "$(hostname)" "$(uname -m)"
 ' 2>/dev/null)" && [[ $identity == imx93-tatsu\|aarch64 ]]; then
-  pass 'Paper Pure is reachable and persistent tunnel services are active'
+  pass 'Paper Pure is reachable and lifecycle-managed tunnel services are active'
 else
-  warn 'Paper Pure is offline; persistent tunnel services could not be verified'
+  warn 'Paper Pure is offline; lifecycle-managed tunnel services could not be verified'
 fi
 
 printf '%s\n' '[Relay acknowledgement]'

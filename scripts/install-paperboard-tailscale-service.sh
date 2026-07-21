@@ -14,15 +14,16 @@ die() { printf '%s: %s\n' "$PROGRAM_NAME" "$*" >&2; exit 1; }
 
 usage() {
   cat <<'EOF'
-Install a boot-persistent userspace Tailscale service on a Paper Pure.
+Install Xovi-lifecycle-persistent private Tailscale SSH on a Paper Pure.
 
 Usage:
   install-paperboard-tailscale-service.sh [--host ALIAS] [--dry-run]
   install-paperboard-tailscale-service.sh [--host ALIAS] --uninstall
 
-The service keeps Funnel disabled and privately forwards tailnet TCP port 22
-to a loopback-only Dropbear socket. Uninstalling leaves Tailscale binaries,
-state, and Paperboard configuration intact for manual operation.
+The persistent scripts live under encrypted home storage. Every Xovi start
+recreates transient systemd services plus a one-minute health timer, keeping
+Funnel disabled and forwarding tailnet TCP port 22 to key-only loopback
+Dropbear. Uninstalling retains Tailscale binaries, state, and Paperboard data.
 EOF
 }
 
@@ -42,10 +43,10 @@ ssh -o BatchMode=yes -- "$host" 'test "$(hostname)" = imx93-tatsu && test "$(una
 
 if $dry_run; then
   if $uninstall; then
-    echo "Would disable and remove the Paperboard Tailscale and loopback Dropbear units."
+    echo "Would remove the persistent private SSH helpers and Xovi lifecycle hook."
   else
-    echo "Would install boot-persistent userspace Tailscale and loopback-only SSH units."
-    echo "Would transition the currently running daemon after this SSH session returns."
+    echo "Would install Xovi-lifecycle-persistent userspace Tailscale and loopback-only SSH."
+    echo "Would add a one-minute health timer and transition the running private route."
   fi
   exit 0
 fi
@@ -53,78 +54,59 @@ fi
 if $uninstall; then
   ssh -o BatchMode=yes -- "$host" '
     set -eu
-    systemctl disable --now paperboard-tailscale-serve.service paperboard-tailscale.service dropbear-loopback.socket 2>/dev/null || true
-    rm -f /etc/systemd/system/paperboard-tailscale.service \
-      /etc/systemd/system/paperboard-tailscale-serve.service \
-      /etc/systemd/system/dropbear-loopback.socket \
-      /etc/systemd/system/dropbear-loopback@.service
-    systemctl daemon-reload
-    systemctl reset-failed paperboard-tailscale-serve.service paperboard-tailscale.service dropbear-loopback.socket 2>/dev/null || true
+    systemctl stop paperboard-tailscale-health.timer paperboard-tailscale-health.service \
+      paperboard-tailscale-serve.service paperboard-tailscale.service \
+      paperboard-dropbear-loopback.service 2>/dev/null || true
+    rm -f /home/root/xovi/scripts/post-start/50-paperboard-private-ssh.sh \
+      /home/root/.local/share/paperboard/tailscale/private-ssh-enabled \
+      /home/root/.local/share/paperboard/tailscale/private-ssh-activate \
+      /home/root/.local/share/paperboard/tailscale/private-ssh-health
   '
-  echo "Boot services removed. Use start-paperboard-tailscale.sh for manual operation."
+    echo "Private SSH lifecycle hooks removed. Use start-paperboard-tailscale.sh manually if needed."
   exit 0
 fi
 
-for unit in dropbear-loopback.socket paperboard-tailscale.service paperboard-tailscale-serve.service; do
-  test -s "$ROOT/deploy/tablet/$unit" || die "missing unit: $unit"
+for helper in paperboard-private-ssh-activate.sh paperboard-private-ssh-health.sh; do
+  test -s "$ROOT/deploy/tablet/$helper" || die "missing helper: $helper"
 done
 
 stage="/home/root/.paperboard-tailscale-service-stage.$$.$RANDOM"
 ssh -o BatchMode=yes -- "$host" "mkdir -m 700 -p '$stage'"
-scp -q "$ROOT/deploy/tablet/dropbear-loopback.socket" \
-  "$ROOT/deploy/tablet/paperboard-tailscale.service" \
-  "$ROOT/deploy/tablet/paperboard-tailscale-serve.service" "$host:$stage/"
+scp -q "$ROOT/deploy/tablet/paperboard-private-ssh-activate.sh" \
+  "$ROOT/deploy/tablet/paperboard-private-ssh-health.sh" "$host:$stage/"
 
 ssh -o BatchMode=yes -- "$host" sh -s -- "$stage" <<'REMOTE'
 set -eu
 stage=$1
 base=/home/root/.local/share/paperboard/tailscale
 test -x "$base/current/tailscaled" -a -x "$base/current/tailscale"
-cp "$stage/dropbear-loopback.socket" /etc/systemd/system/dropbear-loopback.socket
-cp "$stage/paperboard-tailscale.service" /etc/systemd/system/paperboard-tailscale.service
-cp "$stage/paperboard-tailscale-serve.service" /etc/systemd/system/paperboard-tailscale-serve.service
-chmod 0644 /etc/systemd/system/dropbear-loopback.socket \
-  /etc/systemd/system/paperboard-tailscale.service \
-  /etc/systemd/system/paperboard-tailscale-serve.service
-ln -sfn /usr/lib/systemd/system/dropbear@.service /etc/systemd/system/dropbear-loopback@.service
-rm -rf "$stage"
-systemctl daemon-reload
-systemctl enable dropbear-loopback.socket paperboard-tailscale.service paperboard-tailscale-serve.service >/dev/null
-
-transition="$base/activate-systemd-service"
-cat >"$transition" <<'TRANSITION'
+cp "$stage/paperboard-private-ssh-activate.sh" "$base/private-ssh-activate"
+cp "$stage/paperboard-private-ssh-health.sh" "$base/private-ssh-health"
+chmod 0700 "$base/private-ssh-activate" "$base/private-ssh-health"
+touch "$base/private-ssh-enabled"
+chmod 0600 "$base/private-ssh-enabled"
+mkdir -p /home/root/xovi/scripts/post-start
+cat >/home/root/xovi/scripts/post-start/50-paperboard-private-ssh.sh <<'HOOK'
 #!/bin/sh
 set -eu
 base=/home/root/.local/share/paperboard/tailscale
-pidfile="$base/runtime/tailscaled.pid"
-if test -f "$pidfile" && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
-  kill "$(cat "$pidfile")" 2>/dev/null || true
-  attempt=0
-  while kill -0 "$(cat "$pidfile")" 2>/dev/null; do
-    attempt=$((attempt + 1))
-    test "$attempt" -lt 30 || break
-    sleep 0.1
-  done
-fi
-rm -f "$base/runtime/tailscaled.sock" "$pidfile"
-systemctl restart dropbear-loopback.socket || true
-systemctl restart paperboard-tailscale.service
-systemctl restart paperboard-tailscale-serve.service || true
-rm -f "$0"
-TRANSITION
-chmod 0700 "$transition"
-transition_unit="paperboard-tailscale-transition-$(date +%s)"
-systemd-run --quiet --unit="$transition_unit" --on-active=2s "$transition"
+test -f "$base/private-ssh-enabled" || exit 0
+unit="paperboard-private-ssh-activation-$(date +%s)-$$"
+systemd-run --quiet --no-block --collect --unit "$unit" "$base/private-ssh-activate"
+HOOK
+chmod 0700 /home/root/xovi/scripts/post-start/50-paperboard-private-ssh.sh
+rm -rf "$stage"
+"$base/private-ssh-activate"
 REMOTE
 
-echo "Boot units installed. Waiting for the private route to return after daemon handoff."
+echo "Persistent helpers installed. Waiting for the private route to return after daemon handoff."
 for attempt in {1..40}; do
   if ssh -o BatchMode=yes -o ConnectTimeout=2 -- "$host" \
-    'systemctl is-active --quiet paperboard-tailscale.service && systemctl is-active --quiet paperboard-tailscale-serve.service && systemctl is-active --quiet dropbear-loopback.socket' \
+    'systemctl is-active --quiet paperboard-tailscale.service && systemctl is-active --quiet paperboard-tailscale-serve.service && systemctl is-active --quiet paperboard-dropbear-loopback.service && systemctl is-active --quiet paperboard-tailscale-health.timer' \
     >/dev/null 2>&1; then
-    echo "Paperboard Tailscale starts on boot and private SSH is active."
+    echo "Paperboard private SSH is active and will be recreated after each Xovi start."
     exit 0
   fi
   sleep 1
 done
-die "service transition did not become reachable within 40 seconds"
+die "private SSH transition did not become healthy within 40 seconds"

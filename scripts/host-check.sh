@@ -13,8 +13,8 @@ for command_name in git node pnpm rg shellcheck; do
   }
 done
 
-bash -n scripts/*.sh scripts/remarkable
-shellcheck --severity=error scripts/*.sh scripts/remarkable
+bash -n scripts/*.sh scripts/remarkable deploy/tablet/*.sh
+shellcheck --severity=error scripts/*.sh scripts/remarkable deploy/tablet/*.sh
 scripts/bootstrap-ssh.sh --dry-run
 pnpm check
 pnpm test
@@ -60,6 +60,14 @@ fi
 grep -Fq 'restart-appload-runtime.sh' scripts/deploy-paperboard.sh
 grep -Fq 'restart-appload-runtime.sh' scripts/deploy-paperterm.sh
 grep -Fq 'verify-appload-runtime.sh' scripts/deployment-summary.sh
+grep -Fq '/home/root/xovi/scripts/post-start/50-paperboard-private-ssh.sh' \
+  scripts/install-paperboard-tailscale-service.sh
+grep -Fq 'paperboard-tailscale-health.timer' deploy/tablet/paperboard-private-ssh-activate.sh
+if rg -F '/etc/systemd/system' scripts/install-paperboard-tailscale-service.sh \
+    deploy/tablet/paperboard-private-ssh-*.sh; then
+  echo 'host-check.sh: private SSH persistence must not use volatile /etc' >&2
+  exit 1
+fi
 scripts/scan-repository.sh
 git diff --check
 

@@ -83,6 +83,12 @@ grep -Fq 'MSG_SESSION_ENDED' "$ROOT/src/paperterm/backend/paperterm-backend.c" \
   || die 'session teardown is not distinct from application exit'
 grep -Fq 'text: "CONNECTING"' "$ROOT/src/paperterm/qml/Main.qml" \
   || die 'connection progress state is missing'
+grep -Fq 'property string connectionError: ""' "$ROOT/src/paperterm/qml/Main.qml" \
+  || die 'failed SSH sessions do not retain an actionable error state'
+grep -Fq 'SSH could not open a shell.' "$ROOT/src/paperterm/qml/Main.qml" \
+  || die 'failed SSH sessions still disappear silently from the profile screen'
+grep -Fq 'root.disconnectRequested ? ""' "$ROOT/src/paperterm/qml/Main.qml" \
+  || die 'an intentional disconnect must not be reported as a connection failure'
 grep -Fq 'if (firstFrame) root.fullRefresh()' "$ROOT/src/paperterm/qml/Main.qml" \
   || die 'the initial shell frame is not forced onto the e-ink display'
 ! grep -Fq 'id: connectionRefresh' "$ROOT/src/paperterm/qml/Main.qml" \

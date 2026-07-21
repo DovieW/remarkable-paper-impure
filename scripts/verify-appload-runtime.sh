@@ -75,6 +75,21 @@ grep -Fq '/home/root/xovi/extensions.d/appload.so' "/proc/$pid/maps"
 test "$require_paperboard" = false || test -s /home/root/xovi/exthome/appload/paperboard/manifest.json
 test "$require_paperterm" = false || test -s /home/root/xovi/exthome/appload/paperterm/manifest.json
 mount | grep -Eq '^/dev/mmcblk0p3 on / type ext4 \(ro[,)]'
+private_ssh=/home/root/.local/share/paperboard/tailscale
+if test -f "$private_ssh/private-ssh-enabled"; then
+  test -x "$private_ssh/private-ssh-activate"
+  test -x "$private_ssh/private-ssh-health"
+  test -x /home/root/xovi/scripts/post-start/50-paperboard-private-ssh.sh
+  for unit in paperboard-dropbear-loopback.service paperboard-tailscale.service \
+    paperboard-tailscale-serve.service paperboard-tailscale-health.timer; do
+    systemctl is-active --quiet "$unit"
+  done
+  status=$($private_ssh/current/tailscale \
+    --socket="$private_ssh/runtime/tailscaled.sock" status --json)
+  compact=$(printf '%s' "$status" | tr -d '[:space:]')
+  printf '%s' "$compact" | grep -q '"BackendState":"Running"'
+  printf '%s' "$compact" | grep -q '"Online":true'
+fi
 REMOTE
   then
     printf 'PASS  Xovi/AppLoad runtime invariant is healthy on Paper Pure.\n'
