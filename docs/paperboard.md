@@ -37,13 +37,20 @@ rejects credentials and non-default ports, resolves DNS before connecting,
 blocks private/special addresses, validates every redirect, limits response
 size/time, and renders extracted text and safe links rather than arbitrary web
 scripts. Choose **Browse** from Dashboard, then enter an address or search
-phrase with the tablet keyboard. Bare domains are upgraded to HTTPS; other
+phrase with Paperboard's own e-ink keyboard. The reader deliberately does not
+focus a Qt text field, so the stock on-screen keyboard cannot cover the escape
+controls or leave the app trapped. Bare domains are upgraded to HTTPS; other
 input is sent to DuckDuckGo Lite search.
 
-Reader keeps the most recent 25 pages in memory for **Back** and **Forward**.
-**Reload** re-fetches the current page. **Save** persists a bookmark in the
-relay; **Bookmarks** lists the newest 100 saved pages for that tablet. Browser
-history is intentionally session-only, while bookmarks survive restarts.
+**Browse** opens a browser home menu instead of immediately opening the
+keyboard. From there, choose a new address/search, resume the current page,
+open **History**, open **Bookmarks**, or return to Dashboard. Reader keeps the
+most recent 25 pages in memory for **Back**, **Forward**, and the newest-first
+History list. **Reload** re-fetches the current page. **Save** persists a
+bookmark in the relay; Bookmarks lists the newest 100 saved pages for that
+tablet. Browser history is intentionally session-only, while bookmarks survive
+restarts. The address screen has both a fixed top-right **Close** button and a
+bottom **Close** key; either returns to the browser home menu.
 Reader does not execute JavaScript, submit forms, retain cookies, download
 files, or attempt to reproduce a full desktop browser.
 
@@ -51,6 +58,18 @@ files, or attempt to reproduce a full desktop browser.
 
 - Tap content once to show white-backed top and bottom controls.
 - Tap again to hide them.
+- When controls are visible, the top row always contains **Dashboard**,
+  **Screen**, and **Browse**. The black tab is the current destination; black
+  fill is not used for destructive actions.
+- **Refresh** and **Exit** are global controls at the top right. Refresh asks
+  the relay for the latest Paperboard state; Exit returns to AppLoad.
+- The bottom row is contextual. Dashboard contains card navigation, pin,
+  dismiss, and ambient actions; Screen contains message navigation and
+  **Top**; Browse contains reader navigation, menu, address, page reload,
+  bookmark, and **Top** actions.
+- **Dismiss Card** requires a second **Confirm Dismiss** tap within five
+  seconds. Changing cards, changing destinations, choosing another action, or
+  waiting for the timeout cancels it.
 - Vertical drags scroll Screen content smoothly.
 - Reader pages also scroll smoothly; page links are large e-ink-friendly
   targets and browser controls appear in the white bottom bar.
