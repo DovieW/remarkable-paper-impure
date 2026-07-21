@@ -14,6 +14,7 @@ July 14, 2026. It was verified against reMarkable OS image `3.27.3.0` on the
 | Qt resource rebuilder | `19.0.0-r1` | OS-specific stock-UI resource mapping |
 | AppLoad | `0.5.3-r1` | Application launcher inside the stock UI |
 | KOReader | `2026.03-r4` | E-book and document reader |
+| PaperTerm | repository build | Native PTY terminal for reviewed SSH profiles |
 
 Vellum recognizes the virtual device packages `rmppure`, `aarch64`, and
 `remarkable-os=3.27.3.0`. AppLoad's package constraint allows reMarkable OS
@@ -65,6 +66,15 @@ Two interactive launches were verified on the Paper Pure. Display updates,
 touch input, application startup, and return to the stock interface worked.
 Both runs ended with exit code `0` and `QProcess::NormalExit`, and no KOReader
 process remained afterward.
+
+## PaperTerm
+
+PaperTerm is installed as a separate AppLoad application. It uses the tablet's
+existing Dropbear client and prefers the installed Tailscale SSH wrapper for
+tailnet targets. It is not remotely launchable and remote input is blocked
+while it is foregrounded. Explicit authenticated screenshots are supported
+for diagnostics and should be treated as sensitive terminal output.
+Configuration and lifecycle instructions live in [paperterm.md](paperterm.md).
 
 ## Health check
 

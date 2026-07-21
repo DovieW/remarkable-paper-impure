@@ -68,6 +68,7 @@ case "$action" in
     foreground=stock
     ps | grep -F 'backend/entry /tmp/paperboard.sock' | grep -v grep >/dev/null && foreground=paperboard
     ps | grep -F 'backend/entry /tmp/canvas.sock' | grep -v grep >/dev/null && foreground=canvas
+    ps | grep -F 'backend/entry /tmp/paperterm.sock' | grep -v grep >/dev/null && foreground=paperterm
     printf '{"platform":"%s","architecture":"%s","foreground":"%s","launch_available":%s,"screenshot_available":%s}\n' \
       "$(hostname)" "$(uname -m)" "$foreground" \
       "$(test -d /run/paperboard-appload && echo true || echo false)" \
@@ -85,6 +86,7 @@ case "$action" in
     ;;
   launch)
     case "$argument" in ''|*[!A-Za-z0-9._:-]*) echo '{"error":"invalid app id"}'; exit 1;; esac
+    test "$argument" != paperterm || { echo '{"error":"PaperTerm must be launched physically on the tablet"}'; exit 1; }
     test -f "/home/root/xovi/exthome/appload/$argument/manifest.json" || test -f "/home/root/xovi/exthome/appload/${argument#external::}/external.manifest.json" || { echo '{"error":"app is not installed"}'; exit 1; }
     request_dir=/run/paperboard-appload
     test -d "$request_dir" || { echo '{"error":"reviewed AppLoad control adapter is not active"}'; exit 1; }
@@ -96,7 +98,7 @@ case "$action" in
     printf '{"queued":true,"app":"%s"}\n' "$argument"
     ;;
   return)
-    for socket in paperboard canvas; do
+    for socket in paperboard canvas paperterm; do
       ps | awk -v target="backend/entry /tmp/$socket.sock" 'index($0, target) { print $1 }' \
         | while IFS= read -r pid; do
             case "$pid" in ''|*[!0-9]*) continue;; esac
@@ -118,6 +120,8 @@ case "$action" in
     ;;
   input)
     test -z "$argument" || exit 2
+    ps | grep -F 'backend/entry /tmp/paperterm.sock' | grep -v grep >/dev/null \
+      && { echo '{"error":"remote input is disabled while PaperTerm is open"}'; exit 1; }
     test -x /home/root/.local/bin/paperctl-tap || { echo '{"error":"input helper unavailable"}'; exit 1; }
     exec /home/root/.local/bin/paperctl-tap --serve
     ;;

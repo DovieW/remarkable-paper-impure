@@ -36,6 +36,7 @@ test "$platform" = imx93-tatsu && test "$architecture" = aarch64
 foreground=stock
 ps | grep -F 'backend/entry /tmp/paperboard.sock' | grep -v grep >/dev/null && foreground=paperboard
 ps | grep -F 'backend/entry /tmp/canvas.sock' | grep -v grep >/dev/null && foreground=canvas
+ps | grep -F 'backend/entry /tmp/paperterm.sock' | grep -v grep >/dev/null && foreground=paperterm
 locked=unknown
 printf '{"platform":"%s","architecture":"%s","foreground":"%s","lock_state":"%s","screenshot":%s,"input_helper":%s}\n' \
   "$platform" "$architecture" "$foreground" "$locked" \
@@ -62,6 +63,7 @@ REMOTE
     (($# == 1)) || die "launch requires one AppLoad ID"
     app_id=$1
     [[ $app_id =~ ^(external::)?[A-Za-z0-9][A-Za-z0-9._-]{0,126}$ ]] || die "invalid AppLoad ID"
+    [[ $app_id != paperterm ]] || die "PaperTerm must be launched physically on the tablet"
     ssh "${ssh_options[@]}" "$host" sh -s -- "$app_id" <<'REMOTE'
 set -eu
 app_id=$1

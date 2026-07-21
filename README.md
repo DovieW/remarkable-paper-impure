@@ -67,6 +67,11 @@ admin device|client|provider|migrations
 See [docs/agent-tools.md](docs/agent-tools.md) for CLI and MCP use, and
 [docs/paperboard.md](docs/paperboard.md) for the application behavior.
 
+PaperTerm is the separate, physical-user-only terminal application. It opens
+saved Tailscale SSH or key-based SSH sessions without adding an interpreter or
+web terminal to the tablet. Remote launch, screenshots, and injected input are
+blocked while it is open. See [docs/paperterm.md](docs/paperterm.md).
+
 ## Relay and remote
 
 The relay supports native Paperboard clients, TRMNL Hosted BYOD, and self-hosted
@@ -98,6 +103,7 @@ pnpm install --frozen-lockfile
 pnpm check
 pnpm test
 scripts/build-paperboard.sh --clean
+scripts/test-paperterm.sh
 scripts/release-check.sh
 ```
 
@@ -112,6 +118,7 @@ Key guides:
 - [Backups](docs/backups.md)
 - [Custom software](docs/custom-software.md)
 - [Paperboard](docs/paperboard.md)
+- [PaperTerm](docs/paperterm.md)
 - [Relay](docs/relay.md)
 - [Agent tools](docs/agent-tools.md)
 - [Remote](docs/remote.md)

@@ -70,9 +70,11 @@ done
 manifest="$bundle_directory/manifest.json"
 resources="$bundle_directory/resources.rcc"
 backend="$bundle_directory/backend/entry"
+icon="$bundle_directory/icon.png"
 [[ -f "$manifest" ]] || die "AppLoad manifest not found: $manifest"
 [[ -s "$resources" ]] || die "AppLoad resource bundle not found: $resources"
 [[ -x "$backend" ]] || die "Paperboard backend not found or not executable: $backend"
+[[ -s "$icon" ]] || die "Paperboard AppLoad icon not found: $icon"
 [[ -f "$compatibility_manifest" ]] || die "compatibility manifest not found: $compatibility_manifest"
 
 for command_name in ssh scp; do
@@ -90,7 +92,7 @@ IFS='|' read -r device_hostname architecture image_version <<< "$identity"
 node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if (!data.approved_os[process.argv[2]]) process.exit(1)' \
   "$compatibility_manifest" "$image_version" || die "OS $image_version is not approved in config/compatibility.json"
 
-release_id="$(sha256sum "$manifest" "$resources" "$backend" | sha256sum | cut -c1-16)"
+release_id="$(sha256sum "$manifest" "$resources" "$backend" "$icon" | sha256sum | cut -c1-16)"
 
 printf 'Target: %s (%s, OS %s)\n' "$device_hostname" "$architecture" "$image_version"
 printf 'Bundle: %s\n' "$bundle_directory"
@@ -120,6 +122,7 @@ trap cleanup EXIT INT TERM
 
 scp "${ssh_options[@]}" "$manifest" "$host:$remote_stage/manifest.json"
 scp "${ssh_options[@]}" "$resources" "$host:$remote_stage/resources.rcc"
+scp "${ssh_options[@]}" "$icon" "$host:$remote_stage/icon.png"
 scp "${ssh_options[@]}" "$backend" "$host:$remote_stage/backend/entry"
 
 ssh "${ssh_options[@]}" "$host" sh -s -- "$remote_stage" "$restart_xovi" "$release_id" <<'REMOTE'
@@ -127,7 +130,7 @@ set -eu
 stage=$1
 restart_xovi=$2
 release_id=$3
-chmod 644 "$stage/manifest.json" "$stage/resources.rcc"
+chmod 644 "$stage/icon.png" "$stage/manifest.json" "$stage/resources.rcc"
 chmod 700 "$stage/backend"
 chmod 755 "$stage/backend/entry"
 test -d /home/root/xovi/exthome/appload
@@ -178,4 +181,8 @@ if $activate; then
   fi
 fi
 
-printf 'Paperboard deployed and activated transactionally.\n'
+if $activate; then
+  printf 'Paperboard deployed and activated transactionally.\n'
+else
+  printf 'Paperboard deployed transactionally without changing the foreground app.\n'
+fi

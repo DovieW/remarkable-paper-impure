@@ -41,6 +41,9 @@ rmdir "$compose_root"
 trap - EXIT
 pnpm test
 scripts/build-paperboard.sh --clean
+node -e 'const fs=require("fs"); const b=fs.readFileSync(process.argv[1]); if (b.length < 24 || b.subarray(1,4).toString() !== "PNG" || b.readUInt32BE(16) !== 100 || b.readUInt32BE(20) !== 100) process.exit(1)' \
+  build/paperboard-tatsu/icon.png
+scripts/test-paperterm.sh
 git diff --check
 
 if git grep -Iq . -- ':!PERSONAL.md' ':!secrets/**' && git grep -IqE \
@@ -77,4 +80,4 @@ if rg '[A-Za-z0-9.-]+\.ts\.net' "$history_scan" \
   exit 1
 fi
 
-echo 'Paperboard v2 release check passed.'
+echo 'Paperboard v2 and PaperTerm release check passed.'

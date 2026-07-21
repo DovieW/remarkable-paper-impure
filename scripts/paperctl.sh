@@ -62,11 +62,15 @@ REMOTE
     ;;
   tap)
     (($# == 2)) || die "tap requires X and Y coordinates"
+    ssh -o BatchMode=yes "$host" "! ps | grep -F 'backend/entry /tmp/paperterm.sock' | grep -v grep >/dev/null" \
+      || die "remote input is disabled while PaperTerm is open"
     ssh -o BatchMode=yes "$host" /home/root/.local/bin/paperctl-tap "$1" "$2"
     ;;
   swipe)
     (($# == 4 || $# == 5)) || die "swipe requires X1 Y1 X2 Y2 [DURATION_MS]"
     duration="${5:-600}"
+    ssh -o BatchMode=yes "$host" "! ps | grep -F 'backend/entry /tmp/paperterm.sock' | grep -v grep >/dev/null" \
+      || die "remote input is disabled while PaperTerm is open"
     ssh -o BatchMode=yes "$host" /home/root/.local/bin/paperctl-tap "$1" "$2" "$3" "$4" "$duration"
     ;;
   status)

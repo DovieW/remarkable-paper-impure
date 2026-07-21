@@ -1,0 +1,9 @@
+{
+  "name": "PaperTerm",
+  "loadsBackend": true,
+  "entry": "/qml/Main.qml",
+  "id": "paperterm",
+  "version": "0.1.0",
+  "supportsScaling": true,
+  "canHaveMultipleFrontends": false
+}

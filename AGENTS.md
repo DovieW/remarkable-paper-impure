@@ -172,6 +172,11 @@ available. Never automate unlock, request the passcode, or leave Auto sleep
 disabled after a desk session. Build narrow reusable helpers when they remove
 routine physical handoffs without weakening authentication.
 
+PaperTerm screenshots are permitted only as explicit, authenticated diagnostic
+captures. Treat them as potentially sensitive terminal output: do not print,
+commit, or retain them after the diagnostic. Remote launch and input injection
+remain disabled while PaperTerm is foregrounded.
+
 ## Change quality bar
 
 Scripts must use strict shell mode, quote variables, validate prerequisites,

@@ -1,0 +1,30 @@
+{
+  "allow_local_shell": false,
+  "profiles": [
+    {
+      "id": "tailscale-host",
+      "label": "Tailnet host",
+      "mode": "tailscale-ssh",
+      "user": "example-user",
+      "host": "example-host"
+    },
+    {
+      "id": "windows-via-wsl",
+      "label": "Windows PowerShell via WSL",
+      "mode": "tailscale-key",
+      "user": "example-user",
+      "host": "example-wsl-host",
+      "identity_file": "/home/root/.ssh/paperterm_ed25519",
+      "session": "windows-powershell"
+    },
+    {
+      "id": "lan-host",
+      "label": "Trusted LAN host",
+      "mode": "ssh",
+      "user": "example-user",
+      "host": "192.0.2.10",
+      "port": 22,
+      "identity_file": "/home/root/.ssh/paperterm_ed25519"
+    }
+  ]
+}
