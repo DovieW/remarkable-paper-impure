@@ -33,6 +33,7 @@
 #define MAX_CONFIG_SIZE (64U * 1024U)
 #define MAX_MESSAGE_SIZE (256U * 1024U)
 #define MAX_PROFILES 32
+#define MAX_MACROS 6
 #define MAX_SCROLLBACK 400
 #define DEFAULT_ROWS 30
 #define DEFAULT_COLS 100
@@ -71,10 +72,20 @@ struct profile {
     int port;
 };
 
+struct macro_key {
+    char label[17];
+    char key[17];
+    int ctrl;
+    int alt;
+    int shift;
+};
+
 struct app_config {
     int allow_local_shell;
     size_t count;
     struct profile profiles[MAX_PROFILES];
+    size_t macro_count;
+    struct macro_key macros[MAX_MACROS];
 };
 
 static int socket_fd = -1;
@@ -93,6 +104,9 @@ static struct app_config config;
 static char *scrollback[MAX_SCROLLBACK];
 static size_t scrollback_start = 0;
 static size_t scrollback_count = 0;
+static int self_test_capture = 0;
+static unsigned char self_test_output[16];
+static size_t self_test_output_length = 0;
 
 static void send_message(uint32_t type, const char *contents) {
     struct message_header header;
@@ -142,6 +156,56 @@ static int valid_absolute_path(const char *value) {
     return 1;
 }
 
+static int valid_macro_label(const char *value) {
+    size_t index, length;
+    if (value == NULL) return 0;
+    length = strlen(value);
+    if (length == 0 || length > 16) return 0;
+    for (index = 0; index < length; index++) {
+        unsigned char c = (unsigned char)value[index];
+        if (c < 0x20 || c > 0x7e) return 0;
+    }
+    return 1;
+}
+
+static int valid_macro_key(const char *value) {
+    static const char *special[] = {
+        "space", "enter", "tab", "backspace", "escape", "up", "down",
+        "left", "right", "home", "end", "pageup", "pagedown", "delete",
+    };
+    size_t index;
+    if (value == NULL) return 0;
+    if (strlen(value) == 1) {
+        unsigned char c = (unsigned char)value[0];
+        return c >= 0x21 && c <= 0x7e && !(c >= 'A' && c <= 'Z');
+    }
+    for (index = 0; index < sizeof(special) / sizeof(special[0]); index++)
+        if (strcmp(value, special[index]) == 0) return 1;
+    return 0;
+}
+
+static int optional_json_boolean(struct json_object *object, const char *key, int *value) {
+    struct json_object *field;
+    *value = 0;
+    if (!json_object_object_get_ex(object, key, &field)) return 0;
+    if (json_object_get_type(field) != json_type_boolean) return -1;
+    *value = json_object_get_boolean(field);
+    return 0;
+}
+
+static void initialize_default_macros(void) {
+    static const struct macro_key defaults[MAX_MACROS] = {
+        { "TMUX", "space", 1, 0, 0 },
+        { "C-C", "c", 1, 0, 0 },
+        { "C-D", "d", 1, 0, 0 },
+        { "C-Z", "z", 1, 0, 0 },
+        { "C-L", "l", 1, 0, 0 },
+        { "C-R", "r", 1, 0, 0 },
+    };
+    memcpy(config.macros, defaults, sizeof(defaults));
+    config.macro_count = MAX_MACROS;
+}
+
 static int json_string(struct json_object *object, const char *key, const char **value) {
     struct json_object *field;
     if (!json_object_object_get_ex(object, key, &field) ||
@@ -155,9 +219,10 @@ static int read_config(char *error, size_t error_size) {
     FILE *file;
     char *contents;
     size_t count, index;
-    struct json_object *root = NULL, *profiles = NULL, *allow = NULL;
+    struct json_object *root = NULL, *profiles = NULL, *macros = NULL, *allow = NULL;
 
     memset(&config, 0, sizeof(config));
+    initialize_default_macros();
     if (lstat(CONFIG_PATH, &metadata) != 0) {
         snprintf(error, error_size, "No profiles are installed. Configure PaperTerm from the trusted host.");
         return -1;
@@ -185,6 +250,25 @@ static int read_config(char *error, size_t error_size) {
     }
     if (json_object_object_get_ex(root, "allow_local_shell", &allow))
         config.allow_local_shell = json_object_get_boolean(allow);
+    if (json_object_object_get_ex(root, "macros", &macros)) {
+        if (json_object_get_type(macros) != json_type_array ||
+            json_object_array_length(macros) > MAX_MACROS) goto invalid;
+        config.macro_count = json_object_array_length(macros);
+        memset(config.macros, 0, sizeof(config.macros));
+        for (index = 0; index < config.macro_count; index++) {
+            struct json_object *item = json_object_array_get_idx(macros, index);
+            const char *label = NULL, *key = NULL;
+            struct macro_key *macro = &config.macros[index];
+            if (item == NULL || json_object_get_type(item) != json_type_object ||
+                json_string(item, "label", &label) != 0 || json_string(item, "key", &key) != 0 ||
+                !valid_macro_label(label) || !valid_macro_key(key) ||
+                optional_json_boolean(item, "ctrl", &macro->ctrl) != 0 ||
+                optional_json_boolean(item, "alt", &macro->alt) != 0 ||
+                optional_json_boolean(item, "shift", &macro->shift) != 0) goto invalid;
+            snprintf(macro->label, sizeof(macro->label), "%s", label);
+            snprintf(macro->key, sizeof(macro->key), "%s", key);
+        }
+    }
     config.count = json_object_array_length(profiles);
     if (config.count > MAX_PROFILES) config.count = MAX_PROFILES;
     for (index = 0; index < config.count; index++) {
@@ -234,7 +318,7 @@ static int read_config(char *error, size_t error_size) {
     return 0;
 
 invalid:
-    snprintf(error, error_size, "A profile contains an invalid or unsafe value.");
+    snprintf(error, error_size, "A profile or macro contains an invalid or unsafe value.");
     json_object_put(root);
     memset(&config, 0, sizeof(config));
     return -1;
@@ -243,8 +327,10 @@ invalid:
 static void send_profiles(const char *config_error) {
     struct json_object *root = json_object_new_object();
     struct json_object *items = json_object_new_array();
+    struct json_object *macros = json_object_new_array();
     size_t index;
     json_object_object_add(root, "profiles", items);
+    json_object_object_add(root, "macros", macros);
     if (config_error != NULL && *config_error != '\0')
         json_object_object_add(root, "notice", json_object_new_string(config_error));
     for (index = 0; index < config.count; index++) {
@@ -256,6 +342,15 @@ static void send_profiles(const char *config_error) {
             config.profiles[index].mode == PROFILE_SSH ? "ssh" :
             config.profiles[index].mode == PROFILE_TAILSCALE_KEY ? "tailscale-key" : "tailscale-ssh"));
         json_object_array_add(items, item);
+    }
+    for (index = 0; index < config.macro_count; index++) {
+        struct json_object *item = json_object_new_object();
+        json_object_object_add(item, "label", json_object_new_string(config.macros[index].label));
+        json_object_object_add(item, "key", json_object_new_string(config.macros[index].key));
+        json_object_object_add(item, "ctrl", json_object_new_boolean(config.macros[index].ctrl));
+        json_object_object_add(item, "alt", json_object_new_boolean(config.macros[index].alt));
+        json_object_object_add(item, "shift", json_object_new_boolean(config.macros[index].shift));
+        json_object_array_add(macros, item);
     }
     send_message(MSG_PROFILES, json_object_to_json_string_ext(root, JSON_C_TO_STRING_PLAIN));
     json_object_put(root);
@@ -351,6 +446,13 @@ static int write_all(int descriptor, const char *bytes, size_t length) {
 
 static void terminal_output(const char *bytes, size_t length, void *user) {
     (void)user;
+    if (self_test_capture) {
+        size_t available = sizeof(self_test_output) - self_test_output_length;
+        size_t copy = length < available ? length : available;
+        memcpy(self_test_output + self_test_output_length, bytes, copy);
+        self_test_output_length += copy;
+        return;
+    }
     if (pty_fd >= 0 && length > 0) (void)write_all(pty_fd, bytes, length);
 }
 
@@ -538,6 +640,37 @@ static VTermKey parse_key(const char *name) {
     return VTERM_KEY_NONE;
 }
 
+static int send_key_chord(const char *name, VTermModifier modifiers) {
+    VTermKey key;
+    if (terminal == NULL || name == NULL) return -1;
+    if (strcmp(name, "space") == 0) {
+        vterm_keyboard_unichar(terminal, ' ', modifiers);
+        return 0;
+    }
+    if (strlen(name) == 1 && valid_macro_key(name)) {
+        vterm_keyboard_unichar(terminal, (unsigned char)name[0], modifiers);
+        return 0;
+    }
+    key = parse_key(name);
+    if (key == VTERM_KEY_NONE) return -1;
+    vterm_keyboard_key(terminal, key, modifiers);
+    return 0;
+}
+
+static int run_self_test(void) {
+    int passed;
+    self_test_capture = 1;
+    self_test_output_length = 0;
+    memset(self_test_output, 0xff, sizeof(self_test_output));
+    if (create_terminal() != 0) return -1;
+    self_test_output_length = 0;
+    passed = send_key_chord("space", VTERM_MOD_CTRL) == 0 &&
+        self_test_output_length == 1 && self_test_output[0] == 0;
+    self_test_capture = 0;
+    free_terminal();
+    return passed ? 0 : -1;
+}
+
 static void handle_message(uint32_t type, const char *contents) {
     struct json_object *root = NULL, *field = NULL;
     if (type == MSG_SYSTEM_TERMINATE) { stopping = 1; return; }
@@ -555,13 +688,12 @@ static void handle_message(uint32_t type, const char *contents) {
         const char *text = json_object_get_string(field);
         if (text != NULL && strlen(text) <= 4096) (void)write_all(pty_fd, text, strlen(text));
     } else if (type == MSG_KEY && terminal != NULL && json_object_object_get_ex(root, "key", &field)) {
-        VTermKey key = parse_key(json_object_get_string(field));
         VTermModifier modifiers = VTERM_MOD_NONE;
         struct json_object *mods;
         if (json_object_object_get_ex(root, "ctrl", &mods) && json_object_get_boolean(mods)) modifiers |= VTERM_MOD_CTRL;
         if (json_object_object_get_ex(root, "alt", &mods) && json_object_get_boolean(mods)) modifiers |= VTERM_MOD_ALT;
         if (json_object_object_get_ex(root, "shift", &mods) && json_object_get_boolean(mods)) modifiers |= VTERM_MOD_SHIFT;
-        if (key != VTERM_KEY_NONE) vterm_keyboard_key(terminal, key, modifiers);
+        (void)send_key_chord(json_object_get_string(field), modifiers);
     } else if (type == MSG_RESIZE && json_object_object_get_ex(root, "rows", &field)) {
         int new_rows = json_object_get_int(field), new_cols = cols;
         struct winsize size;
@@ -607,6 +739,7 @@ int main(int argc, char **argv) {
     char config_error[256] = "";
     long long last_screen = 0;
     if (argc == 2 && strcmp(argv[1], "--self-test") == 0) {
+        if (run_self_test() != 0) return 1;
         printf("paperterm backend self-test: ok\n");
         return 0;
     }

@@ -97,5 +97,19 @@ for key_name in home end pageup pagedown left right up down delete; do
   grep -Fq "action:\"$key_name\"" "$ROOT/src/paperterm/qml/Main.qml" \
     || die "on-screen navigation key is missing: $key_name"
 done
+grep -Fq 'id: macroRail' "$ROOT/src/paperterm/qml/Main.qml" \
+  || die 'the left-aligned macro rail is missing'
+grep -Fq 'root.sendMacro(modelData)' "$ROOT/src/paperterm/qml/Main.qml" \
+  || die 'macro buttons do not emit structured key chords'
+grep -Fq 'root.sendKey("space")' "$ROOT/src/paperterm/qml/Main.qml" \
+  || die 'on-screen Ctrl+Space does not use the structured key path'
+grep -Fq 'Qt.Key_Space && (event.modifiers & Qt.ControlModifier)' "$ROOT/src/paperterm/qml/Main.qml" \
+  || die 'physical Ctrl+Space does not use the structured key path'
+grep -Fq 'vterm_keyboard_unichar(terminal, '\'' '\'', modifiers)' "$ROOT/src/paperterm/backend/paperterm-backend.c" \
+  || die 'the backend does not encode modified Space through libvterm'
+grep -Fq 'self_test_output[0] == 0' "$ROOT/src/paperterm/backend/paperterm-backend.c" \
+  || die 'the backend self-test does not verify the tmux NUL prefix'
+grep -Fq 'value.macros.length > 6' "$ROOT/scripts/configure-paperterm.sh" \
+  || die 'macro configuration is not bounded by the trusted-host validator'
 bash -n "$ROOT/scripts/authorize-paperterm-key.sh"
 printf 'PaperTerm build, backend syntax, QML, manifest, and control-boundary tests passed.\n'

@@ -24,6 +24,25 @@ The on-screen keyboard includes Escape, modifiers, Tab, Backspace, Enter,
 Home, End, Delete, Page Up, Page Down, and all four arrow keys. A physical
 keyboard can send the same navigation keys.
 
+A left-aligned macro rail provides six one-tap key chords. Without a `macros`
+entry, PaperTerm defaults to `TMUX` (`Ctrl+Space`), `C-C`, `C-D`, `C-Z`, `C-L`,
+and `C-R`. Set `"macros": []` to hide the rail, or define up to six entries:
+
+```json
+"macros": [
+  { "label": "TMUX", "key": "space", "ctrl": true },
+  { "label": "C-C", "key": "c", "ctrl": true }
+]
+```
+
+Labels are printable ASCII up to 16 characters. A key is a lowercase printable
+ASCII character or one of `space`, `enter`, `tab`, `backspace`, `escape`,
+`up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown`, and
+`delete`. The optional `ctrl`, `alt`, and `shift` fields must be booleans.
+Macros emit only the declared structured key chord; they do not contain or
+evaluate shell commands. `Ctrl+Space` is emitted as the NUL byte expected by
+tmux.
+
 ## Security boundary
 
 - Profiles are read from `/home/root/.config/paperterm/profiles.json`. The file

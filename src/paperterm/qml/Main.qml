@@ -16,6 +16,7 @@ Rectangle {
     readonly property real unit: Math.max(0.7, Math.min(width / 1872, height / 1404))
 
     property var profiles: []
+    property var macros: []
     property bool profilesLoaded: false
     property string notice: ""
     property string statusText: "Starting PaperTerm"
@@ -73,6 +74,19 @@ Rectangle {
         shiftHeld = false
     }
 
+    function sendMacro(macro) {
+        if (!sessionActive) return
+        endpoint.sendMessage(3, JSON.stringify({
+            key: macro.key,
+            ctrl: !!macro.ctrl,
+            alt: !!macro.alt,
+            shift: !!macro.shift
+        }))
+        ctrlHeld = false
+        altHeld = false
+        shiftHeld = false
+    }
+
     function startProfile(id) {
         terminalText = ""
         hasTerminalFrame = false
@@ -108,6 +122,7 @@ Rectangle {
         else if (event.key === Qt.Key_PageUp) special = "pageup"
         else if (event.key === Qt.Key_PageDown) special = "pagedown"
         else if (event.key === Qt.Key_Delete) special = "delete"
+        else if (event.key === Qt.Key_Space && (event.modifiers & Qt.ControlModifier)) special = "space"
         if (special.length) {
             endpoint.sendMessage(3, JSON.stringify({key: special,
                 ctrl: !!(event.modifiers & Qt.ControlModifier),
@@ -134,6 +149,7 @@ Rectangle {
                 try {
                     var payload = JSON.parse(contents)
                     root.profiles = payload.profiles || []
+                    root.macros = payload.macros || []
                     root.notice = payload.notice || ""
                     root.profilesLoaded = true
                 } catch (error) { root.notice = "Could not read the profile list." }
@@ -353,8 +369,68 @@ Rectangle {
                 border.color: rule
                 border.width: 1
 
+                Rectangle {
+                    id: macroRail
+                    visible: root.macros.length > 0
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    width: visible ? 132 * unit : 0
+                    color: soft
+
+                    Rectangle {
+                        anchors.right: parent.right
+                        width: 1 * unit
+                        height: parent.height
+                        color: rule
+                    }
+
+                    Column {
+                        anchors.fill: parent
+                        anchors.margins: 12 * unit
+                        spacing: 8 * unit
+                        Repeater {
+                            model: root.macros
+                            delegate: Rectangle {
+                                required property var modelData
+                                width: parent.width
+                                height: (macroRail.height - 24 * unit - Math.max(0, root.macros.length - 1) * 8 * unit) / Math.max(1, root.macros.length)
+                                color: macroTap.pressed ? ink : paper
+                                border.color: ink
+                                border.width: 2 * unit
+                                radius: 2 * unit
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.margins: 6 * unit
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData.label
+                                    color: parent.color === root.ink ? root.paper : root.ink
+                                    font.family: "Noto Sans Mono"
+                                    font.pixelSize: 16 * unit
+                                    font.bold: true
+                                    elide: Text.ElideRight
+                                    horizontalAlignment: Text.AlignHCenter
+                                }
+                                MouseArea {
+                                    id: macroTap
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        root.sendMacro(modelData)
+                                        root.changed(1)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Column {
-                    anchors.fill: parent
+                    id: keyboardRows
+                    anchors.left: macroRail.right
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
                     anchors.margins: 12 * unit
                     spacing: 9 * unit
 
@@ -397,7 +473,7 @@ Rectangle {
                                 model: modelData.split("")
                                 delegate: Rectangle {
                                     required property string modelData
-                                    width: Math.min(103 * unit, (keyboard.width - 70 * unit) / 14)
+                                    width: Math.min(103 * unit, (keyboardRows.width - 70 * unit) / 14)
                                     height: 68 * unit
                                     color: paper; border.color: "#777770"; radius: 2 * unit
                                     Text { anchors.centerIn: parent; text: root.shiftHeld ? modelData.toUpperCase() : modelData; color: ink; font.family: "Noto Sans Mono"; font.pixelSize: 25 * unit; font.bold: true }
@@ -435,6 +511,7 @@ Rectangle {
                                         else if (modelData.action === "alt") root.altHeld = !root.altHeld
                                         else if (modelData.action === "shift") root.shiftHeld = !root.shiftHeld
                                         else if (modelData.action === "symbol") root.symbolLayer = !root.symbolLayer
+                                        else if (modelData.action === "space" && root.ctrlHeld) root.sendKey("space")
                                         else if (modelData.action === "space") root.sendText(" ")
                                         else root.sendKey(modelData.action)
                                         root.changed(1)

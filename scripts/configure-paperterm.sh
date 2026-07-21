@@ -55,6 +55,18 @@ const fs = require('fs');
 const file = process.argv[2];
 const value = JSON.parse(fs.readFileSync(file, 'utf8'));
 if (!value || typeof value !== 'object' || !Array.isArray(value.profiles) || value.profiles.length > 32) process.exit(1);
+const specialKeys = new Set(['space', 'enter', 'tab', 'backspace', 'escape', 'up', 'down', 'left', 'right', 'home', 'end', 'pageup', 'pagedown', 'delete']);
+if (value.macros !== undefined) {
+  if (!Array.isArray(value.macros) || value.macros.length > 6) process.exit(1);
+  for (const macro of value.macros) {
+    if (!macro || typeof macro !== 'object' || typeof macro.label !== 'string' ||
+        macro.label.length < 1 || macro.label.length > 16 || !/^[ -~]+$/.test(macro.label)) process.exit(1);
+    if (typeof macro.key !== 'string' ||
+        !(specialKeys.has(macro.key) || /^[a-z0-9!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]$/.test(macro.key))) process.exit(1);
+    for (const modifier of ['ctrl', 'alt', 'shift'])
+      if (macro[modifier] !== undefined && typeof macro[modifier] !== 'boolean') process.exit(1);
+  }
+}
 for (const p of value.profiles) {
   if (!/^[A-Za-z0-9_.-]{1,64}$/.test(p.id || '') || typeof p.label !== 'string' || p.label.length < 1 || p.label.length > 96) process.exit(1);
   if (!['tailscale-ssh', 'tailscale-key', 'ssh', 'local'].includes(p.mode)) process.exit(1);

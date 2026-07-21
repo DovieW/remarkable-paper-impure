@@ -1,5 +1,13 @@
 {
   "allow_local_shell": false,
+  "macros": [
+    { "label": "TMUX", "key": "space", "ctrl": true },
+    { "label": "C-C", "key": "c", "ctrl": true },
+    { "label": "C-D", "key": "d", "ctrl": true },
+    { "label": "C-Z", "key": "z", "ctrl": true },
+    { "label": "C-L", "key": "l", "ctrl": true },
+    { "label": "C-R", "key": "r", "ctrl": true }
+  ],
   "profiles": [
     {
       "id": "tailscale-host",
