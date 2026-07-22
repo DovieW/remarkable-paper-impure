@@ -161,6 +161,14 @@ Rectangle {
             if(conversationOpen)Qt.callLater(function(){messageList.positionViewAtEnd()})
         }catch(e){statusText="Invalid relay response"}
     }
+    function applyStatus(contents) {
+        if(contents==="CONNECTED"){
+            statusText="Online"
+            if(resultError&&resultText==="Chat relay unavailable; cached conversation retained."){
+                resultText="";resultError=false;undoAction=null
+            }
+        } else statusText=contents
+    }
     function appendEditor(value){if(editorText.length+value.length<=16384){editorText+=value;if(inputMode==="message")draftText=editorText}}
     function backspaceEditor(){editorText=editorText.slice(0,-1);if(inputMode==="message")draftText=editorText}
 
@@ -177,7 +185,7 @@ Rectangle {
         id:endpoint;applicationID:"chat"
         onMessageReceived:(type,contents)=>{
             if(type===101)root.applySnapshot(contents)
-            else if(type===102)root.statusText=contents==="CONNECTED"?"Online":contents
+            else if(type===102)root.applyStatus(contents)
             else if(type===103){root.statusText=contents;root.resultText=contents;root.resultError=true}
         }
     }

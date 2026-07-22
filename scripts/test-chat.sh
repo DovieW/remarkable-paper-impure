@@ -13,6 +13,7 @@ grep -Fq 'text:"RESTORE"' "$qml" || die 'secondary conversation views lack Resto
 ! grep -Fq 'HIDDEN' "$qml" || die 'the unclear Hidden label remains in Chat'
 grep -Fq 'root.contextualActions()' "$qml" || die 'conversation controls are not state-aware'
 grep -Fq 'resultStrip' "$qml" || die 'persistent action feedback is missing'
+grep -Fq 'resultText==="Chat relay unavailable; cached conversation retained."' "$qml" || die 'stale relay errors are not cleared after reconnection'
 grep -Fq 'pendingActionId.length' "$qml" || die 'repeat taps are not suppressed while an action is pending'
 grep -Fq 'kind:"regenerate"' "$qml" || die 'Regenerate is not distinct from Retry'
 grep -Fq 'lastUserMessage("failed")' "$qml" || die 'Retry is not limited to failed user messages'
