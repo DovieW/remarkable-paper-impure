@@ -42,6 +42,7 @@ Rectangle {
     property var undoAction: null
     property int refreshWeight: 0
     property double lastBackAt: 0
+    property string messageRevision: ""
 
     function uuid() {
         var seed = Date.now().toString(16) + Math.floor(Math.random() * 0x7fffffff).toString(16)
@@ -61,7 +62,7 @@ Rectangle {
     }
     function selectSession(item) {
         selectedSession=item.session_key; selectedTitle=item.title; selectedAgent=item.agent_id
-        conversationOpen=true; keyboardVisible=false; inputMode="message"; editorText=draftText
+        conversationOpen=true; keyboardVisible=false; inputMode="message"; editorText=draftText;messageRevision=""
         endpoint.sendMessage(1,selectedSession)
         post({id:uuid(),kind:"mark_read",session_key:selectedSession,value:true})
         ghostBuster.forceClearNow("chat open")
@@ -69,7 +70,7 @@ Rectangle {
     function returnToConversationList() {
         var now=Date.now();if(now-lastBackAt<700)return
         lastBackAt=now;conversationOpen=false;keyboardVisible=false;inputMode="message";editorText=draftText
-        selectedSession="";selectedTitle="Chat";selectedAgent="";messages=[];actions=[]
+        selectedSession="";selectedTitle="Chat";selectedAgent="";messages=[];actions=[];messageRevision=""
         endpoint.sendMessage(1,"")
         Qt.callLater(function(){ghostBuster.forceClearNow("chat list return")})
     }
@@ -82,6 +83,15 @@ Rectangle {
         }
         return result
     }
+    function completionLabel(kind) {
+        var labels={send:"Sent",create:"Created",rename:"Renamed",pin:"Updated",archive:"Updated",hide:"Removed",restore:"Restored",abort:"Stopped",retry:"Retried",regenerate:"Regenerated"}
+        return labels[kind]||"Done"
+    }
+    function revisionFor(rows) {
+        if(!rows.length)return "empty"
+        var last=rows[rows.length-1]
+        return rows.length+":"+String(last.id||"")+":"+String(last.status||"")+":"+String(last.body||"").length
+    }
     function openEditor(mode, text) { inputMode=mode; editorText=text||""; keyboardVisible=true; forceActiveFocus() }
     function submitInput() {
         var value=editorText.trim(); if(!value.length||pendingActionId.length)return
@@ -93,7 +103,7 @@ Rectangle {
         if(inputMode==="new"){
             var key="paperchat:"+uuid();var agent=selectedAgent||(agents.length?agents[0].id:"main")
             if(queueAction({id:uuid(),kind:"create",session_key:key,agent_id:agent,title:value},"Creating conversation",null)){
-                selectedSession=key;selectedTitle=value;selectedAgent=agent;conversationOpen=true;keyboardVisible=false;endpoint.sendMessage(1,key)
+                selectedSession=key;selectedTitle=value;selectedAgent=agent;conversationOpen=true;keyboardVisible=false;messageRevision="";endpoint.sendMessage(1,key)
             }
             return
         }
@@ -159,7 +169,7 @@ Rectangle {
         if(row.status==="queued")resultText=pendingLabel+" · queued"
         else if(row.status==="processing")resultText=pendingLabel+" · working"
         else if(row.status==="completed"){
-            resultText=pendingLabel.replace(/ing$/,"ed");resultError=false
+            resultText=completionLabel(pendingKind);resultError=false
             if(pendingKind==="hide"){conversationOpen=false;listMode="removed";endpoint.sendMessage(1,"")}
             pendingActionId="";pendingKind="";pendingLabel="";pendingMessageId=""
         } else if(row.status==="failed"){
@@ -170,12 +180,16 @@ Rectangle {
     function applySnapshot(text) {
         try {
             var snapshot=JSON.parse(text);agents=snapshot.agents||[];sessions=snapshot.sessions||[];actions=snapshot.actions||[]
-            if(snapshot.selected_session_key===selectedSession)messages=visibleMessages(snapshot.messages||[])
+            var changed=false
+            if(snapshot.selected_session_key===selectedSession){
+                var nextMessages=visibleMessages(snapshot.messages||[]),nextRevision=revisionFor(nextMessages)
+                changed=nextRevision!==messageRevision;messages=nextMessages;messageRevision=nextRevision
+            }
             var item=currentSession();if(item){selectedTitle=item.title;selectedAgent=item.agent_id}
             statusText=snapshot.bridge&&snapshot.bridge.last_error?"Bridge issue":"Online"
             updatePending()
             refreshWeight++;if(refreshWeight>=7){refreshWeight=0;ghostBuster.forceClearNow("chat cadence")}
-            if(conversationOpen)Qt.callLater(function(){messageList.positionViewAtEnd()})
+            if(conversationOpen&&changed)Qt.callLater(function(){messageList.positionViewAtEnd()})
         }catch(e){statusText="Invalid relay response"}
     }
     function applyStatus(contents) {
@@ -275,8 +289,8 @@ Rectangle {
         model:messages
         delegate:Item {
             required property var modelData;width:messageList.width;height:bubble.height
-            Rectangle{id:bubble;width:Math.min(parent.width*0.78,messageText.implicitWidth+56*unit);height:Math.max(74*unit,messageText.implicitHeight+40*unit);anchors.right:modelData.role==="user"?parent.right:undefined;anchors.left:modelData.role==="user"?undefined:parent.left;color:modelData.role==="user"?"#f1eee4":"#fff";border.color:modelData.status==="failed"?accent:line;border.width:1;radius:8*unit
-                Text{id:messageText;anchors.fill:parent;anchors.margins:20*unit;text:modelData.body;textFormat:Text.MarkdownText;wrapMode:Text.Wrap;color:ink;font.family:"Noto Sans";font.pixelSize:22*unit}
+            Rectangle{id:bubble;width:Math.min(parent.width*0.78,Math.max(150*unit,messageText.implicitWidth+40*unit));height:Math.max(74*unit,messageText.implicitHeight+40*unit+(modelData.status!=="complete"?18*unit:0));anchors.right:modelData.role==="user"?parent.right:undefined;anchors.left:modelData.role==="user"?undefined:parent.left;color:modelData.role==="user"?"#f1eee4":"#fff";border.color:modelData.status==="failed"?accent:line;border.width:1;radius:8*unit
+                Text{id:messageText;anchors.left:parent.left;anchors.right:parent.right;anchors.top:parent.top;anchors.margins:20*unit;text:modelData.body;textFormat:Text.MarkdownText;wrapMode:Text.Wrap;color:ink;font.family:"Noto Sans";font.pixelSize:22*unit}
                 Text{anchors.right:parent.right;anchors.bottom:parent.bottom;anchors.margins:8*unit;visible:modelData.status!=="complete";text:modelData.status.toUpperCase();color:accent;font.family:"Noto Mono";font.pixelSize:11*unit}
             }
         }
