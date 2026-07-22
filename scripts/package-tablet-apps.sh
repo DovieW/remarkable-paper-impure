@@ -12,7 +12,7 @@ skip_build=false
 
 usage() {
   cat <<'EOF'
-Build reproducible, checksummed Paperboard and PaperTerm runtime archives.
+Build reproducible, checksummed Paperboard, PaperTerm, and Chat runtime archives.
 
 Usage: package-tablet-apps.sh --version VERSION [--output DIRECTORY] [--skip-build]
 
@@ -42,10 +42,12 @@ tar --version 2>/dev/null | grep -Fq 'GNU tar' || die "GNU tar is required for r
 if ! $skip_build; then
   "$ROOT/scripts/build-paperboard.sh" --clean
   "$ROOT/scripts/test-paperterm.sh"
+  "$ROOT/scripts/build-chat.sh" --clean
 fi
 
 paperboard_bundle="$ROOT/build/paperboard-tatsu"
 paperterm_bundle="$ROOT/build/paperterm-tatsu"
+chat_bundle="$ROOT/build/chat-tatsu"
 for required in \
   "$paperboard_bundle/manifest.json" "$paperboard_bundle/resources.rcc" \
   "$paperboard_bundle/icon.png" "$paperboard_bundle/backend/entry" \
@@ -55,12 +57,15 @@ for required in \
   "$paperterm_bundle/LICENSE.libvterm" "$paperterm_bundle/LICENSE.nerd-fonts.txt"; do
   [[ -s "$required" ]] || die "runtime file is missing: $required"
 done
+for required in "$chat_bundle/manifest.json" "$chat_bundle/resources.rcc" "$chat_bundle/icon.png" "$chat_bundle/backend/entry"; do
+  [[ -s "$required" ]] || die "runtime file is missing: $required"
+done
 
 release_directory="$output_root/$version"
 staging_directory="$(mktemp -d)"
 cleanup() { rm -rf "$staging_directory"; }
 trap cleanup EXIT INT TERM
-mkdir -p "$staging_directory/paperboard/backend" "$staging_directory/paperterm/backend" "$staging_directory/paperterm/fonts"
+mkdir -p "$staging_directory/paperboard/backend" "$staging_directory/paperterm/backend" "$staging_directory/paperterm/fonts" "$staging_directory/chat/backend"
 install -m 0644 "$paperboard_bundle/manifest.json" "$staging_directory/paperboard/manifest.json"
 install -m 0644 "$paperboard_bundle/resources.rcc" "$staging_directory/paperboard/resources.rcc"
 install -m 0644 "$paperboard_bundle/icon.png" "$staging_directory/paperboard/icon.png"
@@ -73,11 +78,16 @@ install -m 0644 "$paperterm_bundle/fonts/NotoMonoNerdFontMono-Regular.ttf" \
   "$staging_directory/paperterm/fonts/NotoMonoNerdFontMono-Regular.ttf"
 install -m 0644 "$paperterm_bundle/LICENSE.libvterm" "$staging_directory/paperterm/LICENSE.libvterm"
 install -m 0644 "$paperterm_bundle/LICENSE.nerd-fonts.txt" "$staging_directory/paperterm/LICENSE.nerd-fonts.txt"
+install -m 0644 "$chat_bundle/manifest.json" "$staging_directory/chat/manifest.json"
+install -m 0644 "$chat_bundle/resources.rcc" "$staging_directory/chat/resources.rcc"
+install -m 0644 "$chat_bundle/icon.png" "$staging_directory/chat/icon.png"
+install -m 0755 "$chat_bundle/backend/entry" "$staging_directory/chat/backend/entry"
 
 mkdir -p "$release_directory"
 paperboard_archive="$release_directory/paperboard-$version-tatsu.tar.gz"
 paperterm_archive="$release_directory/paperterm-$version-tatsu.tar.gz"
-for app in paperboard paperterm; do
+chat_archive="$release_directory/chat-$version-tatsu.tar.gz"
+for app in paperboard paperterm chat; do
   archive="$release_directory/$app-$version-tatsu.tar.gz"
   tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
     -C "$staging_directory/$app" -cf - . | gzip -n -9 >"$archive"
@@ -86,14 +96,14 @@ done
 
 (
   cd "$release_directory"
-  sha256sum "${paperboard_archive##*/}" "${paperterm_archive##*/}" >SHA256SUMS
+  sha256sum "${paperboard_archive##*/}" "${paperterm_archive##*/}" "${chat_archive##*/}" >SHA256SUMS
   sha256sum -c SHA256SUMS >/dev/null
 )
 
 commit="$(git -C "$ROOT" rev-parse HEAD)"
 dirty=false
 [[ -z "$(git -C "$ROOT" status --porcelain)" ]] || dirty=true
-node - "$release_directory" "$version" "$commit" "$dirty" "${paperboard_archive##*/}" "${paperterm_archive##*/}" <<'NODE'
+node - "$release_directory" "$version" "$commit" "$dirty" "${paperboard_archive##*/}" "${paperterm_archive##*/}" "${chat_archive##*/}" <<'NODE'
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
@@ -114,4 +124,4 @@ NODE
 
 printf 'Tablet app release bundle complete: %s\n' "$release_directory"
 printf '  %s\n  %s\n  %s\n  %s\n' \
-  "$paperboard_archive" "$paperterm_archive" "$release_directory/SHA256SUMS" "$release_directory/release-manifest.json"
+  "$paperboard_archive" "$paperterm_archive" "$chat_archive" "$release_directory/SHA256SUMS" "$release_directory/release-manifest.json"

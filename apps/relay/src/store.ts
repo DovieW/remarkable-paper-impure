@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { CanvasEventInput, CanvasMessageInput, CardInput, CardPatch, DeliveryCard, PaperboardCommandAction, PaperboardUiState } from "@paperboard/core";
+import { decryptSecret, encryptSecret, type CanvasEventInput, type CanvasMessageInput, type CardInput, type CardPatch, type ChatAction, type ChatBridgeSync, type DeliveryCard, type PaperboardCommandAction, type PaperboardUiState } from "@paperboard/core";
 
 type DeviceRow = { id: string; token_hash: string; cursor: number; last_seen_at: string | null; last_ack_cursor: number; provider_kind: string };
 type ClientRow = { id: string; token_hash: string; scopes: string; created_at?: string; last_used_at?: string | null; revoked_at?: string | null };
@@ -31,10 +31,12 @@ export interface DeviceStatus {
 export class Store {
   readonly db: DatabaseSync;
   readonly assetsDir: string;
+  readonly masterKey: Buffer;
 
-  constructor(path: string, assetsDir: string) {
+  constructor(path: string, assetsDir: string, masterKey: Buffer) {
     mkdirSync(assetsDir, { recursive: true, mode: 0o700 });
     this.assetsDir = assetsDir;
+    this.masterKey = masterKey;
     this.db = new DatabaseSync(path);
     this.db.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
     this.migrate();
@@ -164,6 +166,44 @@ export class Store {
       CREATE INDEX IF NOT EXISTS reader_bookmarks_device_age ON reader_bookmarks(device_id, created_at DESC);
     `);
     this.db.prepare("INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (5, 'reader-bookmarks')").run();
+    const currentDeviceColumns = this.db.prepare("PRAGMA table_info(devices)").all() as Array<{ name: string }>;
+    if (!currentDeviceColumns.some((column) => column.name === "chat_cursor")) this.db.exec("ALTER TABLE devices ADD COLUMN chat_cursor INTEGER NOT NULL DEFAULT 0");
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS chat_agents (
+        device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+        id TEXT NOT NULL, name_enc TEXT NOT NULL, updated_at TEXT NOT NULL,
+        PRIMARY KEY(device_id, id)
+      );
+      CREATE TABLE IF NOT EXISTS chat_sessions (
+        device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+        session_key TEXT NOT NULL, agent_id TEXT NOT NULL, channel TEXT NOT NULL,
+        title_enc TEXT NOT NULL, updated_at TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0,
+        pinned INTEGER NOT NULL DEFAULT 0, hidden INTEGER NOT NULL DEFAULT 0,
+        unread INTEGER NOT NULL DEFAULT 0, run_status TEXT NOT NULL DEFAULT 'idle', run_id TEXT,
+        PRIMARY KEY(device_id, session_key)
+      );
+      CREATE INDEX IF NOT EXISTS chat_sessions_recent ON chat_sessions(device_id, hidden, updated_at DESC);
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        device_id TEXT NOT NULL, id TEXT NOT NULL, session_key TEXT NOT NULL,
+        role TEXT NOT NULL, status TEXT NOT NULL, body_enc TEXT NOT NULL, asset_id TEXT,
+        run_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+        PRIMARY KEY(device_id, id),
+        FOREIGN KEY(device_id, session_key) REFERENCES chat_sessions(device_id, session_key) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS chat_messages_session ON chat_messages(device_id, session_key, created_at);
+      CREATE TABLE IF NOT EXISTS chat_actions (
+        id TEXT PRIMARY KEY, device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL, payload_enc TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued',
+        attempts INTEGER NOT NULL DEFAULT 0, detail TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS chat_actions_pending ON chat_actions(device_id, status, created_at);
+      CREATE TABLE IF NOT EXISTS chat_bridge_state (
+        device_id TEXT PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
+        last_seen_at TEXT, last_error TEXT
+      );
+    `);
+    this.db.prepare("INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (6, 'encrypted-paperchat')").run();
   }
 
   createDevice(id: string, tokenHash: string): void {
@@ -521,6 +561,83 @@ export class Store {
   getProvider(deviceId: string): { kind: string; encryptedConfig: string | null } | undefined {
     const row = this.db.prepare("SELECT provider_kind AS kind, provider_config AS encryptedConfig FROM devices WHERE id=?").get(deviceId);
     return row as { kind: string; encryptedConfig: string | null } | undefined;
+  }
+
+  private advanceChatCursor(deviceId: string): number {
+    this.db.prepare("UPDATE devices SET chat_cursor=chat_cursor+1 WHERE id=?").run(deviceId);
+    return Number((this.db.prepare("SELECT chat_cursor FROM devices WHERE id=?").get(deviceId) as { chat_cursor: number } | undefined)?.chat_cursor ?? 0);
+  }
+
+  chatCursor(deviceId: string): number {
+    return Number((this.db.prepare("SELECT chat_cursor FROM devices WHERE id=?").get(deviceId) as { chat_cursor: number } | undefined)?.chat_cursor ?? 0);
+  }
+
+  applyChatAction(deviceId: string, action: ChatAction): void {
+    const now = new Date().toISOString();
+    this.transaction(() => {
+      if (action.kind === "pin" || action.kind === "hide" || action.kind === "restore" || action.kind === "mark_read") {
+        const column = action.kind === "pin" ? "pinned" : action.kind === "mark_read" ? "unread" : "hidden";
+        const value = action.kind === "restore" ? 0 : action.kind === "mark_read" ? 0 : action.value ? 1 : 0;
+        this.db.prepare(`UPDATE chat_sessions SET ${column}=?, updated_at=? WHERE device_id=? AND session_key=?`).run(value, now, deviceId, action.session_key);
+      } else {
+        if (action.kind === "create") {
+          this.db.prepare(`INSERT OR IGNORE INTO chat_sessions(device_id,session_key,agent_id,channel,title_enc,updated_at)
+            VALUES(?,?,?,?,?,?)`).run(deviceId, action.session_key, action.agent_id, "paperchat", encryptSecret(action.title, this.masterKey), now);
+        }
+        if (action.kind === "send" || action.kind === "retry") {
+          this.db.prepare(`INSERT INTO chat_messages(device_id,id,session_key,role,status,body_enc,created_at,updated_at)
+            VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(device_id,id) DO UPDATE SET status='queued', body_enc=excluded.body_enc, updated_at=excluded.updated_at`)
+            .run(deviceId, action.message_id, action.session_key, "user", "queued", encryptSecret(action.text, this.masterKey), now, now);
+        }
+        this.db.prepare(`INSERT OR IGNORE INTO chat_actions(id,device_id,kind,payload_enc,created_at,updated_at) VALUES(?,?,?,?,?,?)`)
+          .run(action.id, deviceId, action.kind, encryptSecret(JSON.stringify(action), this.masterKey), now, now);
+      }
+      this.advanceChatCursor(deviceId);
+    });
+  }
+
+  pendingChatActions(deviceId: string): ChatAction[] {
+    const rows = this.db.prepare("SELECT payload_enc FROM chat_actions WHERE device_id=? AND status='queued' ORDER BY created_at LIMIT 100").all(deviceId) as Array<{ payload_enc: string }>;
+    return rows.map((row) => JSON.parse(decryptSecret(row.payload_enc, this.masterKey)) as ChatAction);
+  }
+
+  syncChat(deviceId: string, input: ChatBridgeSync): void {
+    const now = new Date().toISOString();
+    this.transaction(() => {
+      for (const agent of input.agents) this.db.prepare(`INSERT INTO chat_agents(device_id,id,name_enc,updated_at) VALUES(?,?,?,?)
+        ON CONFLICT(device_id,id) DO UPDATE SET name_enc=excluded.name_enc,updated_at=excluded.updated_at`)
+        .run(deviceId, agent.id, encryptSecret(agent.name, this.masterKey), now);
+      for (const session of input.sessions) this.db.prepare(`INSERT INTO chat_sessions(device_id,session_key,agent_id,channel,title_enc,updated_at,archived,run_status,run_id)
+        VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(device_id,session_key) DO UPDATE SET agent_id=excluded.agent_id,channel=excluded.channel,
+        title_enc=excluded.title_enc,updated_at=excluded.updated_at,archived=excluded.archived,run_status=excluded.run_status,run_id=excluded.run_id`)
+        .run(deviceId, session.session_key, session.agent_id, session.channel, encryptSecret(session.title, this.masterKey), session.updated_at, session.archived ? 1 : 0, session.run_status, session.run_id);
+      for (const message of input.messages) this.db.prepare(`INSERT INTO chat_messages(device_id,id,session_key,role,status,body_enc,asset_id,run_id,created_at,updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(device_id,id) DO UPDATE SET status=excluded.status,body_enc=excluded.body_enc,
+        asset_id=excluded.asset_id,run_id=excluded.run_id,updated_at=excluded.updated_at`)
+        .run(deviceId, message.id, message.session_key, message.role, message.status, encryptSecret(message.body, this.masterKey), message.asset_id, message.run_id, message.created_at, now);
+      for (const receipt of input.receipts) this.db.prepare("UPDATE chat_actions SET status=?,detail=?,updated_at=? WHERE device_id=? AND id=?")
+        .run(receipt.status, receipt.detail, now, deviceId, receipt.id);
+      this.db.prepare(`INSERT INTO chat_bridge_state(device_id,last_seen_at,last_error) VALUES(?,?,?)
+        ON CONFLICT(device_id) DO UPDATE SET last_seen_at=excluded.last_seen_at,last_error=excluded.last_error`).run(deviceId, now, input.error);
+      for (const session of input.sessions) this.db.prepare(`DELETE FROM chat_messages WHERE rowid IN (SELECT rowid FROM chat_messages WHERE device_id=? AND session_key=? ORDER BY created_at DESC LIMIT -1 OFFSET 500)`).run(deviceId, session.session_key);
+      this.db.prepare(`DELETE FROM chat_sessions WHERE rowid IN (SELECT rowid FROM chat_sessions WHERE device_id=? AND pinned=0 ORDER BY updated_at DESC LIMIT -1 OFFSET 100)`).run(deviceId);
+      this.advanceChatCursor(deviceId);
+    });
+  }
+
+  chatSnapshot(deviceId: string, sessionKey?: string): Record<string, unknown> {
+    const agents = (this.db.prepare("SELECT id,name_enc FROM chat_agents WHERE device_id=? ORDER BY id").all(deviceId) as Array<{id:string;name_enc:string}>).map((row) => ({ id: row.id, name: decryptSecret(row.name_enc, this.masterKey) }));
+    const sessions = (this.db.prepare("SELECT * FROM chat_sessions WHERE device_id=? ORDER BY pinned DESC,updated_at DESC LIMIT 100").all(deviceId) as Array<Record<string, unknown>>).map((row) => ({
+      session_key: row.session_key, agent_id: row.agent_id, channel: row.channel, title: decryptSecret(String(row.title_enc), this.masterKey), updated_at: row.updated_at,
+      archived: Boolean(row.archived), pinned: Boolean(row.pinned), hidden: Boolean(row.hidden), unread: Number(row.unread), run_status: row.run_status, run_id: row.run_id,
+    }));
+    const selected = sessionKey ?? String((sessions.find((item) => !item.hidden) as Record<string, unknown> | undefined)?.session_key ?? "");
+    const messages = selected ? (this.db.prepare("SELECT * FROM chat_messages WHERE device_id=? AND session_key=? ORDER BY created_at LIMIT 500").all(deviceId, selected) as Array<Record<string, unknown>>).map((row) => ({
+      id: row.id, session_key: row.session_key, role: row.role, status: row.status, body: decryptSecret(String(row.body_enc), this.masterKey), asset_id: row.asset_id,
+      ...(row.asset_id ? { asset_url: `/v2/device/${deviceId}/assets/${row.asset_id}` } : {}), run_id: row.run_id, created_at: row.created_at,
+    })) : [];
+    const bridge = this.db.prepare("SELECT last_seen_at,last_error FROM chat_bridge_state WHERE device_id=?").get(deviceId) as Record<string, unknown> | undefined;
+    return { cursor: this.chatCursor(deviceId), agents, sessions, selected_session_key: selected || null, messages, bridge: bridge ?? null };
   }
 
   cleanup(): void {

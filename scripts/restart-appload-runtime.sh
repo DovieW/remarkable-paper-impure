@@ -17,7 +17,8 @@ Usage: restart-appload-runtime.sh [--host remarkable-usb]
 
 The helper records the current xochitl PID, schedules Xovi independently of
 the SSH session, and succeeds only after a different, healthy Xovi/AppLoad
-runtime is active. APP may be paperboard or paperterm for its uninstall path.
+runtime is active. APP may be paperboard, paperterm, or chat for its uninstall
+path.
 EOF
 }
 
@@ -28,7 +29,7 @@ while (($#)); do
     --host) (($# >= 2)) || die '--host requires a value'; host="$2"; shift 2 ;;
     --allow-missing-app)
       (($# >= 2)) || die '--allow-missing-app requires a value'
-      [[ "$2" == paperboard || "$2" == paperterm ]] || die 'unsupported application'
+      [[ "$2" == paperboard || "$2" == paperterm || "$2" == chat ]] || die 'unsupported application'
       allow_missing+=(--allow-missing-app "$2")
       shift 2
       ;;

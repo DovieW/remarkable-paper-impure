@@ -19,8 +19,8 @@ Device:
   runtime verify|restart|recover  Check or safely restore Xovi/AppLoad over USB
 
 Applications:
-  build paperboard|paperterm|all  Build tablet application bundles
-  deploy paperboard|paperterm     Back up and transactionally deploy one app
+  build paperboard|paperterm|chat|all  Build tablet application bundles
+  deploy paperboard|paperterm|chat     Back up and transactionally deploy one app
   package [options]               Create checksummed runtime archives
 
 Repository:
@@ -53,7 +53,8 @@ case "$command_name" in
     case "$target" in
       paperboard) exec "$ROOT/scripts/build-paperboard.sh" "$@" ;;
       paperterm) exec "$ROOT/scripts/build-paperterm.sh" "$@" ;;
-      all) "$ROOT/scripts/build-paperboard.sh" "$@"; exec "$ROOT/scripts/build-paperterm.sh" "$@" ;;
+      chat) exec "$ROOT/scripts/build-chat.sh" "$@" ;;
+      all) "$ROOT/scripts/build-paperboard.sh" "$@"; "$ROOT/scripts/build-paperterm.sh" "$@"; exec "$ROOT/scripts/build-chat.sh" "$@" ;;
       *) printf 'remarkable: unknown build target: %s\n' "$target" >&2; exit 2 ;;
     esac
     ;;
@@ -62,7 +63,8 @@ case "$command_name" in
     case "$target" in
       paperboard) exec "$ROOT/scripts/deploy-paperboard.sh" "$@" ;;
       paperterm) exec "$ROOT/scripts/deploy-paperterm.sh" "$@" ;;
-      *) printf 'remarkable: deploy one app at a time: paperboard or paperterm\n' >&2; exit 2 ;;
+      chat) exec "$ROOT/scripts/deploy-chat.sh" "$@" ;;
+      *) printf 'remarkable: deploy one app at a time: paperboard, paperterm, or chat\n' >&2; exit 2 ;;
     esac
     ;;
   package) exec "$ROOT/scripts/package-tablet-apps.sh" "$@" ;;

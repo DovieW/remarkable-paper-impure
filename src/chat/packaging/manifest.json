@@ -1,0 +1,9 @@
+{
+  "name": "Chat",
+  "loadsBackend": true,
+  "entry": "/qml/Main.qml",
+  "id": "chat",
+  "version": "0.1.0",
+  "supportsScaling": true,
+  "canHaveMultipleFrontends": false
+}

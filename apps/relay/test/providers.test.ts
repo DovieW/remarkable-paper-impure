@@ -11,7 +11,7 @@ import { Store } from "../src/store.js";
 
 test("Terminus adapter uses the TRMNL display contract and creates one ambient frame", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "paperboard-provider-"));
-  const store = new Store(join(root, "provider.sqlite"), join(root, "assets"));
+  const store = new Store(join(root, "provider.sqlite"), join(root, "assets"), Buffer.alloc(32, 1));
   store.createDevice("paper-pure", hashToken("test-device-token"));
   const image = await sharp({ create: { width: 80, height: 40, channels: 3, background: "white" } }).png().toBuffer();
   let displayRequests = 0;
@@ -54,7 +54,7 @@ test("Terminus adapter uses the TRMNL display contract and creates one ambient f
 
 test("TRMNL Hosted adapter sends BYOD credentials and keeps the absolute image URL", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "paperboard-trmnl-hosted-"));
-  const store = new Store(join(root, "provider.sqlite"), join(root, "assets"));
+  const store = new Store(join(root, "provider.sqlite"), join(root, "assets"), Buffer.alloc(32, 1));
   store.createDevice("paper-pure", hashToken("test-device-token"));
   const validated: Array<{ url: string; allowPrivate: boolean }> = [];
   let fetchedImage = "";

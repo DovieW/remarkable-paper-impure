@@ -8,6 +8,7 @@ wait_seconds=45
 after_pid=0
 require_paperboard=true
 require_paperterm=true
+require_chat=true
 
 usage() {
   cat <<'EOF'
@@ -19,11 +20,12 @@ Usage: verify-appload-runtime.sh [--host HOST] [--wait SECONDS]
 
 The check is read-only. It waits for a UI restart to settle, then requires an
 active Xovi-injected xochitl process, the Xovi message broker, installed
-Paperboard and PaperTerm manifests, and a read-only root filesystem.
+Paperboard, PaperTerm, and Chat manifests, and a read-only root filesystem.
 
 --after-pid requires xochitl to have a different process ID, proving that a
 scheduled UI restart actually completed. --allow-missing-app accepts
-paperboard or paperterm and is reserved for that application's uninstall path.
+paperboard, paperterm, or chat and is reserved for that application's uninstall
+path.
 EOF
 }
 
@@ -39,7 +41,8 @@ while (($#)); do
       case "$2" in
         paperboard) require_paperboard=false ;;
         paperterm) require_paperterm=false ;;
-        *) die '--allow-missing-app must be paperboard or paperterm' ;;
+        chat) require_chat=false ;;
+        *) die '--allow-missing-app must be paperboard, paperterm, or chat' ;;
       esac
       shift 2
       ;;
@@ -57,11 +60,12 @@ ssh_options=(-o BatchMode=yes -o ConnectTimeout=5)
 deadline=$((SECONDS + wait_seconds))
 while :; do
   if ssh "${ssh_options[@]}" "$host" sh -s -- \
-    "$after_pid" "$require_paperboard" "$require_paperterm" <<'REMOTE' >/dev/null 2>&1
+    "$after_pid" "$require_paperboard" "$require_paperterm" "$require_chat" <<'REMOTE' >/dev/null 2>&1
 set -eu
 after_pid=$1
 require_paperboard=$2
 require_paperterm=$3
+require_chat=$4
 test "$(hostname)" = imx93-tatsu
 test "$(uname -m)" = aarch64
 test "$(systemctl is-active xochitl.service)" = active
@@ -74,6 +78,7 @@ test -s /home/root/xovi/extensions.d/appload.so
 grep -Fq '/home/root/xovi/extensions.d/appload.so' "/proc/$pid/maps"
 test "$require_paperboard" = false || test -s /home/root/xovi/exthome/appload/paperboard/manifest.json
 test "$require_paperterm" = false || test -s /home/root/xovi/exthome/appload/paperterm/manifest.json
+test "$require_chat" = false || test -s /home/root/xovi/exthome/appload/chat/manifest.json
 mount | grep -Eq '^/dev/mmcblk0p3 on / type ext4 \(ro[,)]'
 private_ssh=/home/root/.local/share/paperboard/tailscale
 if test -f "$private_ssh/private-ssh-enabled"; then

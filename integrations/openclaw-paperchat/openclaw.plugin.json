@@ -1,0 +1,7 @@
+{
+  "id": "paperchat",
+  "name": "Paperboard Chat",
+  "description": "Private relay bridge between OpenClaw sessions and the Paper Pure Chat app.",
+  "activation": { "onStartup": true },
+  "configSchema": { "type": "object", "additionalProperties": false, "properties": {} }
+}

@@ -51,6 +51,7 @@ set -eu
 app_root=/home/root/xovi/exthome/appload
 paperboard=$app_root/paperboard
 paperterm=$app_root/paperterm
+chat=$app_root/chat
 test -x "$paperboard/backend/entry"
 test -s "$paperboard/manifest.json"
 test -s "$paperboard/resources.rcc"
@@ -60,10 +61,15 @@ test -s "$paperterm/manifest.json"
 test -s "$paperterm/resources.rcc"
 test -s "$paperterm/icon.png"
 test -s "$paperterm/fonts/NotoMonoNerdFontMono-Regular.ttf"
+test -x "$chat/backend/entry"
+test -s "$chat/manifest.json"
+test -s "$chat/resources.rcc"
+test -s "$chat/icon.png"
 paperterm_self_test=$($paperterm/backend/entry --self-test)
 test "$paperterm_self_test" = "paperterm backend self-test: ok"
 paperboard_release=$(cat /home/root/.local/share/paperboard/current-release)
 paperterm_release=$(cat /home/root/.local/share/paperterm/current-release)
+chat_release=$(cat /home/root/.local/share/chat/current-release)
 paperboard_actual=$({
   sha256sum "$paperboard/manifest.json" | cut -d' ' -f1
   sha256sum "$paperboard/resources.rcc" | cut -d' ' -f1
@@ -79,21 +85,30 @@ paperterm_actual=$({
   sha256sum "$paperterm/fonts/NotoMonoNerdFontMono-Regular.ttf" | cut -d' ' -f1
   sha256sum "$paperterm/LICENSE.nerd-fonts.txt" | cut -d' ' -f1
 } | sha256sum | cut -c1-16)
+chat_actual=$({
+  sha256sum "$chat/manifest.json" | cut -d' ' -f1
+  sha256sum "$chat/resources.rcc" | cut -d' ' -f1
+  sha256sum "$chat/backend/entry" | cut -d' ' -f1
+  sha256sum "$chat/icon.png" | cut -d' ' -f1
+} | sha256sum | cut -c1-16)
 test "$paperboard_release" = "$paperboard_actual"
 test "$paperterm_release" = "$paperterm_actual"
+test "$chat_release" = "$chat_actual"
 paperboard_rollback=false
 paperterm_rollback=false
+chat_rollback=false
 test ! -d /home/root/.local/share/paperboard/deployment-previous || paperboard_rollback=true
 test ! -d /home/root/.local/share/paperterm/deployment-previous || paperterm_rollback=true
-printf '%s|%s|%s|%s|%s|%s|%s\n' \
-  "$paperboard_release" "$paperterm_release" \
+test ! -d /home/root/.local/share/chat/deployment-previous || chat_rollback=true
+printf '%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
+  "$paperboard_release" "$paperterm_release" "$chat_release" \
   "$(systemctl is-active xochitl)" "$(systemctl is-active dropbear-wlan.socket)" \
-  "$paperboard_rollback" "$paperterm_rollback" "$paperterm_self_test"
+  "$paperboard_rollback" "$paperterm_rollback" "$chat_rollback" "$paperterm_self_test"
 REMOTE
 )" || die "installed application integrity check failed"
 
-IFS='|' read -r paperboard_release paperterm_release xochitl_service ssh_service \
-  paperboard_rollback paperterm_rollback paperterm_self_test <<<"$remote_status"
+IFS='|' read -r paperboard_release paperterm_release chat_release xochitl_service ssh_service \
+  paperboard_rollback paperterm_rollback chat_rollback paperterm_self_test <<<"$remote_status"
 [[ "$xochitl_service" == active ]] || die "xochitl is not active"
 [[ "$ssh_service" == active ]] || die "Wi-Fi SSH socket is not active"
 
@@ -104,7 +119,9 @@ scp "${ssh_options[@]}" "$host:/home/root/xovi/exthome/appload/paperboard/icon.p
   "$temporary_directory/paperboard.png" >/dev/null
 scp "${ssh_options[@]}" "$host:/home/root/xovi/exthome/appload/paperterm/icon.png" \
   "$temporary_directory/paperterm.png" >/dev/null
-node - "$temporary_directory/paperboard.png" "$temporary_directory/paperterm.png" <<'NODE'
+scp "${ssh_options[@]}" "$host:/home/root/xovi/exthome/appload/chat/icon.png" \
+  "$temporary_directory/chat.png" >/dev/null
+node - "$temporary_directory/paperboard.png" "$temporary_directory/paperterm.png" "$temporary_directory/chat.png" <<'NODE'
 const fs = require("fs");
 for (const path of process.argv.slice(2)) {
   const bytes = fs.readFileSync(path);
@@ -114,9 +131,9 @@ for (const path of process.argv.slice(2)) {
 NODE
 
 if $json; then
-  node - "$os_version" "$paperboard_release" "$paperterm_release" "$xochitl_service" "$ssh_service" \
-    "$paperboard_rollback" "$paperterm_rollback" <<'NODE'
-const [os, paperboard, paperterm, xochitl, ssh, paperboardRollback, papertermRollback] = process.argv.slice(2);
+  node - "$os_version" "$paperboard_release" "$paperterm_release" "$chat_release" "$xochitl_service" "$ssh_service" \
+    "$paperboard_rollback" "$paperterm_rollback" "$chat_rollback" <<'NODE'
+const [os, paperboard, paperterm, chat, xochitl, ssh, paperboardRollback, papertermRollback, chatRollback] = process.argv.slice(2);
 console.log(JSON.stringify({
   ok: true,
   device: { model: "reMarkable Paper Pure", platform: "imx93-tatsu", architecture: "aarch64", os },
@@ -124,6 +141,7 @@ console.log(JSON.stringify({
   applications: {
     paperboard: { release: paperboard, icon: "100x100 PNG", rollback_available: paperboardRollback === "true" },
     paperterm: { release: paperterm, icon: "100x100 PNG", backend_self_test: "ok", rollback_available: papertermRollback === "true" },
+    chat: { release: chat, icon: "100x100 PNG", rollback_available: chatRollback === "true" },
   },
 }, null, 2));
 NODE
@@ -132,7 +150,8 @@ else
   printf 'PASS  xochitl and Wi-Fi SSH services are active\n'
   printf 'PASS  Paperboard release %s matches installed content\n' "$paperboard_release"
   printf 'PASS  PaperTerm release %s matches installed content\n' "$paperterm_release"
-  printf 'PASS  both AppLoad icons are 100x100 PNG files\n'
+  printf 'PASS  Chat release %s matches installed content\n' "$chat_release"
+  printf 'PASS  all AppLoad icons are 100x100 PNG files\n'
   printf 'PASS  %s\n' "$paperterm_self_test"
-  printf 'INFO  rollback available: paperboard=%s paperterm=%s\n' "$paperboard_rollback" "$paperterm_rollback"
+  printf 'INFO  rollback available: paperboard=%s paperterm=%s chat=%s\n' "$paperboard_rollback" "$paperterm_rollback" "$chat_rollback"
 fi

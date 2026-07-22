@@ -1,0 +1,9 @@
+{
+  "name": "@paperboard/openclaw-paperchat",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "openclaw": { "extensions": ["./dist/index.js"] },
+  "scripts": { "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node24 --external:openclaw/* --outfile=dist/index.js", "check": "tsc -p tsconfig.json --noEmit", "test": "node --test test/*.test.mjs" },
+  "devDependencies": { "esbuild": "0.28.1", "typescript": "^5.9.3", "@types/node": "^24.10.0" }
+}

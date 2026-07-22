@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { createHash, randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
-import { canvasEventInputSchema, canvasMessageInputSchema, canvasSessionInputSchema, cardInputSchema, cardPatchSchema, clientScopeSchema, commandResultSchema, DEVICE_ID_PATTERN, devicePollQuerySchema, hashToken, issueToken, paperboardCommandSchema, paperboardUiStateSchema, providerSchema, tabletLaunchSchema } from "@paperboard/core";
+import { canvasEventInputSchema, canvasMessageInputSchema, canvasSessionInputSchema, cardInputSchema, cardPatchSchema, chatActionSchema, chatBridgeSyncSchema, clientScopeSchema, commandResultSchema, DEVICE_ID_PATTERN, devicePollQuerySchema, hashToken, issueToken, paperboardCommandSchema, paperboardUiStateSchema, providerSchema, tabletLaunchSchema } from "@paperboard/core";
 import { z } from "zod";
 import { requireAdmin, requireDevice, requireScope } from "./auth.js";
 import type { RelayConfig } from "./config.js";
@@ -62,7 +62,7 @@ export interface RelayServer {
 export function buildServer(config: RelayConfig): RelayServer {
   const app = Fastify({ logger: true, bodyLimit: MAX_INPUT_BYTES });
   const adminApp = Fastify({ logger: true, bodyLimit: 1024 * 1024 });
-  const store = new Store(config.databasePath, config.assetsDir);
+  const store = new Store(config.databasePath, config.assetsDir, config.masterKey);
   const providers = new ProviderManager(store, config.masterKey, config.publicBaseUrl);
   const tablet = new TabletBridge(config.tabletBridgeCommand);
   const changes = new EventEmitter();
@@ -318,6 +318,55 @@ export function buildServer(config: RelayConfig): RelayServer {
       commands: store.pendingCommands(device),
       server_time: new Date().toISOString(),
     };
+  });
+
+  app.get("/v2/device/:device/chat/poll", async (request, reply) => {
+    const { device } = deviceParamSchema.parse(request.params);
+    if (!requireDevice(request, store, device)) return deny(reply);
+    const query = devicePollQuerySchema.extend({ session: z.string().min(8).max(240).optional() }).parse(request.query);
+    let cursor = store.chatCursor(device);
+    if (cursor <= query.cursor && query.wait > 0) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(done, query.wait * 1000);
+        const changed = (): void => done();
+        function done(): void { clearTimeout(timer); changes.off(`${device}:chat`, changed); resolve(); }
+        changes.once(`${device}:chat`, changed);
+      });
+      cursor = store.chatCursor(device);
+    }
+    store.heartbeat(device);
+    return { ...store.chatSnapshot(device, query.session), cursor, server_time: new Date().toISOString() };
+  });
+
+  app.post("/v2/device/:device/chat/actions", async (request, reply) => {
+    const { device } = deviceParamSchema.parse(request.params);
+    if (!requireDevice(request, store, device)) return deny(reply);
+    try {
+      const action = chatActionSchema.parse(request.body);
+      store.applyChatAction(device, action);
+      changes.emit(`${device}:chat`);
+      return reply.code(202).send(receipt(request, `chat.${action.kind}`, { id: action.id }));
+    } catch (error) { return bad(reply, error); }
+  });
+
+  app.get("/v2/integrations/openclaw/:device/chat/poll", async (request, reply) => {
+    if (!client(request, "chat:bridge:read")) return deny(reply);
+    try {
+      const { device } = deviceParamSchema.parse(request.params);
+      if (!store.getDevice(device)) return reply.code(404).send({ error: "device not found" });
+      return { actions: store.pendingChatActions(device), server_time: new Date().toISOString() };
+    } catch (error) { return bad(reply, error); }
+  });
+
+  app.post("/v2/integrations/openclaw/:device/chat/sync", async (request, reply) => {
+    if (!client(request, "chat:bridge:write")) return deny(reply);
+    try {
+      const { device } = deviceParamSchema.parse(request.params);
+      if (!store.getDevice(device)) return reply.code(404).send({ error: "device not found" });
+      store.syncChat(device, chatBridgeSyncSchema.parse(request.body));
+      changes.emit(`${device}:chat`);
+      return reply.code(202).send(receipt(request, "chat.bridge.sync"));
+    } catch (error) { return bad(reply, error); }
   });
   app.get("/v2/devices/:device/screen/sessions/:session/events", async (request, reply) => {
     if (!client(request, "screen:read")) return deny(reply);

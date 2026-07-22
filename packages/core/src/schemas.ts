@@ -59,8 +59,35 @@ export const devicePollQuerySchema = z.object({
 
 export const clientScopeSchema = z.enum([
   "dashboard:read", "dashboard:write", "dashboard:clear", "screen:read", "screen:write",
-  "status:read", "device:apps", "device:control",
+  "status:read", "device:apps", "device:control", "chat:bridge:read", "chat:bridge:write",
 ]);
+
+export const CHAT_MESSAGE_MAX_BYTES = 16 * 1024;
+export const chatActionSchema = z.discriminatedUnion("kind", [
+  z.object({ id: z.string().uuid(), kind: z.literal("create"), session_key: z.string().min(8).max(240), agent_id: z.string().min(1).max(160), title: z.string().trim().min(1).max(160) }),
+  z.object({ id: z.string().uuid(), kind: z.enum(["send", "retry"]), session_key: z.string().min(8).max(240), message_id: z.string().uuid(), text: z.string().min(1).max(CHAT_MESSAGE_MAX_BYTES) }),
+  z.object({ id: z.string().uuid(), kind: z.literal("abort"), session_key: z.string().min(8).max(240) }),
+  z.object({ id: z.string().uuid(), kind: z.literal("rename"), session_key: z.string().min(8).max(240), title: z.string().trim().min(1).max(160) }),
+  z.object({ id: z.string().uuid(), kind: z.enum(["archive", "pin", "hide", "restore", "mark_read"]), session_key: z.string().min(8).max(240), value: z.boolean().default(true) }),
+]);
+
+export const chatBridgeSyncSchema = z.object({
+  agents: z.array(z.object({ id: z.string().min(1).max(160), name: z.string().trim().min(1).max(160) })).max(100).default([]),
+  sessions: z.array(z.object({
+    session_key: z.string().min(8).max(240), agent_id: z.string().min(1).max(160),
+    channel: z.string().min(1).max(80), title: z.string().trim().min(1).max(160),
+    updated_at: z.string().datetime(), archived: z.boolean().default(false),
+    run_status: z.enum(["idle", "working", "failed"]).default("idle"), run_id: z.string().max(240).nullable().default(null),
+  })).max(100).default([]),
+  messages: z.array(z.object({
+    id: z.string().min(1).max(240), session_key: z.string().min(8).max(240),
+    role: z.enum(["user", "assistant", "system"]), status: z.enum(["queued", "streaming", "complete", "failed"]),
+    body: z.string().max(128 * 1024), asset_id: z.string().regex(CARD_ID_PATTERN).nullable().default(null),
+    run_id: z.string().max(240).nullable().default(null), created_at: z.string().datetime(),
+  })).max(1000).default([]),
+  receipts: z.array(z.object({ id: z.string().uuid(), status: z.enum(["completed", "failed"]), detail: z.string().max(300).default("") })).max(100).default([]),
+  error: z.string().max(300).nullable().default(null),
+});
 
 export const tabletAppIdSchema = z.string().regex(/^(?:external::)?[a-zA-Z0-9][a-zA-Z0-9._-]{0,126}$/);
 export const tabletLaunchSchema = z.object({ app_id: tabletAppIdSchema });
@@ -160,6 +187,8 @@ export type CardInput = z.infer<typeof cardInputSchema>;
 export type CardPatch = z.infer<typeof cardPatchSchema>;
 export type ProviderInput = z.infer<typeof providerSchema>;
 export type ClientScope = z.infer<typeof clientScopeSchema>;
+export type ChatAction = z.infer<typeof chatActionSchema>;
+export type ChatBridgeSync = z.infer<typeof chatBridgeSyncSchema>;
 export type PaperboardCommandAction = z.infer<typeof paperboardCommandActionSchema>;
 export type PaperboardUiState = z.infer<typeof paperboardUiStateSchema>;
 export type CanvasMessageInput = z.infer<typeof canvasMessageInputSchema>;

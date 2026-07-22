@@ -72,6 +72,10 @@ saved Tailscale SSH or key-based SSH sessions without adding an interpreter or
 web terminal to the tablet. Remote launch, screenshots, and injected input are
 blocked while it is open. See [docs/paperterm.md](docs/paperterm.md).
 
+Chat is the native OpenClaw conversation client. It keeps a durable encrypted
+outbox in the existing relay, supports new and existing sessions, and never
+takes over the foreground when a reply arrives. See [Chat](docs/chat.md).
+
 ## Relay and remote
 
 The relay supports native Paperboard clients, TRMNL Hosted BYOD, and self-hosted
@@ -125,6 +129,7 @@ Key guides:
 - [Custom software](docs/custom-software.md)
 - [Paperboard](docs/paperboard.md)
 - [PaperTerm](docs/paperterm.md)
+- [Chat](docs/chat.md)
 - [Relay](docs/relay.md)
 - [Agent tools](docs/agent-tools.md)
 - [Remote](docs/remote.md)

@@ -22,10 +22,37 @@ function fixture(tabletBridgeCommand?: string) {
 async function provision(adminApp: ReturnType<typeof buildServer>["adminApp"], adminToken: string, device = "pure-one") {
   const deviceResponse = await adminApp.inject({ method: "POST", url: "/admin/devices", headers: { authorization: `Bearer ${adminToken}` }, payload: { id: device } });
   assert.equal(deviceResponse.statusCode, 201);
-  const clientResponse = await adminApp.inject({ method: "POST", url: "/admin/clients", headers: { authorization: `Bearer ${adminToken}` }, payload: { id: `agent-${device}`, scopes: ["dashboard:read", "dashboard:write", "dashboard:clear", "screen:read", "screen:write", "status:read", "device:apps", "device:control"] } });
+  const clientResponse = await adminApp.inject({ method: "POST", url: "/admin/clients", headers: { authorization: `Bearer ${adminToken}` }, payload: { id: `agent-${device}`, scopes: ["dashboard:read", "dashboard:write", "dashboard:clear", "screen:read", "screen:write", "status:read", "device:apps", "device:control", "chat:bridge:read", "chat:bridge:write"] } });
   assert.equal(clientResponse.statusCode, 201);
   return { deviceToken: deviceResponse.json().token as string, clientToken: clientResponse.json().token as string };
 }
+
+test("Chat keeps an encrypted idempotent outbox and bounded device snapshot", async (context) => {
+  const current = fixture();
+  context.after(async () => { await current.adminApp.close(); await current.app.close(); rmSync(current.root, { recursive: true, force: true }); });
+  const credentials = await provision(current.adminApp, current.config.adminToken);
+  const deviceHeaders = { authorization: `Bearer ${credentials.deviceToken}` };
+  const clientHeaders = { authorization: `Bearer ${credentials.clientToken}` };
+  const sessionKey = "paperchat:local-session-0001";
+  const action = { id: "42ffae12-2e97-4bd2-9fdf-73e37152cbd8", kind: "create", session_key: sessionKey, agent_id: "main", title: "Private plan" };
+  assert.equal((await current.app.inject({ method: "POST", url: "/v2/device/pure-one/chat/actions", headers: deviceHeaders, payload: action })).statusCode, 202);
+  assert.equal((await current.app.inject({ method: "POST", url: "/v2/device/pure-one/chat/actions", headers: deviceHeaders, payload: action })).statusCode, 202);
+  const queued = await current.app.inject({ method: "GET", url: "/v2/integrations/openclaw/pure-one/chat/poll", headers: clientHeaders });
+  assert.equal(queued.json().actions.length, 1);
+  assert.equal(queued.json().actions[0].title, "Private plan");
+  const raw = current.store.db.prepare("SELECT title_enc,payload_enc FROM chat_sessions JOIN chat_actions USING(device_id) WHERE chat_sessions.device_id=?").get("pure-one") as { title_enc: string; payload_enc: string };
+  assert.equal(raw.title_enc.includes("Private plan"), false);
+  assert.equal(raw.payload_enc.includes("Private plan"), false);
+  const synced = await current.app.inject({ method: "POST", url: "/v2/integrations/openclaw/pure-one/chat/sync", headers: clientHeaders, payload: {
+    agents: [{ id: "main", name: "Claw" }], sessions: [{ session_key: sessionKey, agent_id: "main", channel: "paperchat", title: "Private plan", updated_at: new Date().toISOString() }],
+    messages: [{ id: "assistant-1", session_key: sessionKey, role: "assistant", status: "complete", body: "Ready.", created_at: new Date().toISOString() }], receipts: [{ id: action.id, status: "completed" }],
+  } });
+  assert.equal(synced.statusCode, 202);
+  const snapshot = await current.app.inject({ method: "GET", url: `/v2/device/pure-one/chat/poll?cursor=0&wait=0&session=${encodeURIComponent(sessionKey)}`, headers: deviceHeaders });
+  assert.equal(snapshot.json().sessions[0].title, "Private plan");
+  assert.equal(snapshot.json().messages[0].body, "Ready.");
+  assert.equal((await current.app.inject({ method: "GET", url: "/v2/integrations/openclaw/pure-one/chat/poll", headers: clientHeaders })).json().actions.length, 0);
+});
 
 test("tablet bridge is scope protected and validates installed-app control responses", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "paperboard-bridge-"));

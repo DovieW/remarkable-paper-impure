@@ -35,4 +35,4 @@ second_package_hashes="$(sha256sum build/releases/release-check/*.tar.gz)"
   exit 1
 }
 
-echo 'Paperboard v2 and PaperTerm release check passed.'
+echo 'Paperboard, PaperTerm, and Chat release checks passed.'
