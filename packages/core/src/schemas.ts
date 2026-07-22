@@ -96,6 +96,7 @@ export const chatBridgeSyncSchema = z.object({
     body: z.string().max(128 * 1024), asset_id: z.string().regex(CARD_ID_PATTERN).nullable().default(null),
     run_id: z.string().max(240).nullable().default(null), created_at: z.string().datetime(),
   })).max(1000).default([]),
+  replace_session_messages: z.array(z.string().min(8).max(240)).max(100).default([]),
   receipts: z.array(z.object({ id: z.string().uuid(), status: z.enum(["completed", "failed"]), detail: z.string().max(300).default("") })).max(100).default([]),
   error: z.string().max(300).nullable().default(null),
 });

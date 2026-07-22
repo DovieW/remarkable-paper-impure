@@ -13,6 +13,9 @@ stock notebook UI, Paperboard, Canvas, or PaperTerm.
 - Existing OpenClaw sessions can be viewed and continued. Continuations use
   `deliver: false`, so a reply requested from Chat stays in Chat instead of
   also appearing in Telegram.
+- Imported sessions without an OpenClaw label use a compact form of their first
+  user message as the title, with a channel-and-date fallback. The generic
+  `Conversation` placeholder is not presented as a useful title.
 - Replies remain queued while Chat is closed. Posting never launches the app.
 - The private relay cache is bounded to 100 conversations and 500 messages per
   conversation. Titles, bodies, and queued action payloads are AES-256-GCM
@@ -22,6 +25,11 @@ stock notebook UI, Paperboard, Canvas, or PaperTerm.
   prompt. Retry is always an explicit user action.
 - Assistant streaming and final updates reuse one deterministic message ID, so
   a final response replaces its streaming row instead of becoming a duplicate.
+- Changed imported transcripts are reconciled authoritatively. Exact adjacent
+  duplicate assistant records are collapsed, and the relay replaces that
+  session's cached import atomically so historical duplicates are removed too.
+- Back always returns from a conversation to Chat's own conversation list.
+  Exit is the only control that returns to AppLoad.
 - Search, pin, and Remove are local. Rename and archive are applied to OpenClaw.
 - The top bar contains navigation and app controls; the second row contains
   state-aware conversation actions. Every asynchronous action exposes a

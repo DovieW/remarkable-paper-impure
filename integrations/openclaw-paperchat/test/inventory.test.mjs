@@ -56,3 +56,26 @@ test("owned PaperChat sessions are not re-imported and action message ids are st
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("inventory derives a useful title and collapses adjacent duplicate assistant records", async () => {
+  const root = await mkdtemp(join(tmpdir(), "paperchat-derived-"));
+  try {
+    const transcript = join(root, "session.jsonl");
+    await writeFile(transcript, [
+      { id: "user-one", timestamp: "2026-07-21T20:00:00.000Z", message: { role: "user", content: "Plan the migration safely" } },
+      { id: "assistant-one", timestamp: "2026-07-21T20:00:01.000Z", message: { role: "assistant", content: "Here is the plan" } },
+      { id: "assistant-duplicate", timestamp: "2026-07-21T20:00:02.000Z", message: { role: "assistant", content: "Here is the plan" } },
+    ].map((row) => JSON.stringify(row)).join("\n"), { mode: 0o600 });
+    const sessionKey = "agent:main:web:derived-title";
+    const api = {
+      config: { agents: { list: [] } },
+      runtime: { agent: { session: { listSessionEntries: () => [{ sessionKey, entry: { sessionFile: transcript, lastChannel: "web", updatedAt: Date.parse("2026-07-21T20:00:02.000Z") } }] } } },
+    };
+    const result = await __testing.inventory(api);
+    assert.equal(result.sessions[0].title, "Plan the migration safely");
+    assert.deepEqual(result.messages.map((message) => [message.role, message.body]), [["user", "Plan the migration safely"], ["assistant", "Here is the plan"]]);
+    assert.deepEqual(result.replace_session_messages, [sessionKey]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

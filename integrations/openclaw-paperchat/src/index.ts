@@ -14,6 +14,7 @@ const activeRuns=new Map<string,AbortController>();
 const jobs=new Map<string,Promise<void>>();
 const receipts=new Map<string,Receipt>();
 const historyVersions=new Map<string,string>();
+const derivedTitles=new Map<string,string>();
 const ownedSessions=new Map<string,string>();
 const workerId=`paperchat-${randomUUID()}`;
 const leaseSeconds=45;
@@ -75,10 +76,23 @@ async function history(sessionKey:string,entry:any){
       if(!message||!["user","assistant"].includes(message.role))continue;
       const body=textContent(message.content??message.text);if(!body)continue;
       const created=new Date(message.timestamp??row.timestamp??Date.now()).toISOString();
+      const previous=messages.at(-1);
+      if(message.role==="assistant"&&previous?.role==="assistant"&&previous.body===body)continue;
       messages.push({id:String(message.id??row.id??stableId(sessionKey,message.role,created,body)),session_key:sessionKey,role:message.role,status:"complete",body,asset_id:null,run_id:null,created_at:created});
     }
     return messages.slice(-500);
   }catch{return[];}
+}
+
+function derivedTitle(messages:any[],channel:string,updatedAt:unknown){
+  const firstUser=messages.find((message)=>message.role==="user")?.body;
+  if(firstUser){
+    const compact=String(firstUser).replace(/[`*_>#\[\]()]/g," ").replace(/\s+/g," ").trim();
+    if(compact.length)return compact.length<=72?compact:`${compact.slice(0,69).trimEnd()}…`;
+  }
+  const name=(channel||"web").replace(/[-_]+/g," ").replace(/\b\w/g,(value)=>value.toUpperCase());
+  const date=new Date(Number(updatedAt)||Date.now()).toISOString().slice(0,10);
+  return `${name} chat · ${date}`;
 }
 
 function agentIds(api:Api){
@@ -97,14 +111,23 @@ function entries(api:Api){
 async function inventory(api:Api,owned:Map<string,string>=ownedSessions){
   const selected=[...entries(api)].filter(([key])=>![":global:",":unknown:",":system:"].some((part)=>key.includes(part)))
     .sort((left,right)=>Number(right[1].entry?.updatedAt||0)-Number(left[1].entry?.updatedAt||0)).slice(0,100);
-  const sessions=selected.map(([key,{agentId,entry}])=>({session_key:key,agent_id:agentId,channel:String(entry.lastChannel||entry.origin?.surface||entry.origin?.provider||"web"),title:String(entry.label||entry.displayName||"Conversation"),updated_at:new Date(entry.updatedAt||Date.now()).toISOString(),archived:Boolean(entry.archivedAt),run_status:activeRuns.has(key)?"working":"idle",run_id:null}));
   const messages:any[]=[];
+  const replaceSessionMessages:string[]=[];
   for(const [key,{entry}] of selected){
     if(owned.has(key))continue;
     const version=String(entry?.updatedAt||"");if(historyVersions.get(key)===version)continue;
-    messages.push(...await history(key,entry));historyVersions.set(key,version);
+    const imported=await history(key,entry);
+    messages.push(...imported);replaceSessionMessages.push(key);historyVersions.set(key,version);
+    const channel=String(entry.lastChannel||entry.origin?.surface||entry.origin?.provider||"web");
+    derivedTitles.set(key,derivedTitle(imported,channel,entry.updatedAt));
   }
-  return{agents:agentIds(api).map((id)=>({id,name:id})),sessions,messages};
+  const sessions=selected.map(([key,{agentId,entry}])=>{
+    const channel=String(entry.lastChannel||entry.origin?.surface||entry.origin?.provider||"web");
+    const explicit=String(entry.label||entry.displayName||"").trim();
+    const title=explicit&&explicit.toLowerCase()!=="conversation"?explicit:derivedTitles.get(key)||derivedTitle([],channel,entry.updatedAt);
+    return{session_key:key,agent_id:agentId,channel,title,updated_at:new Date(entry.updatedAt||Date.now()).toISOString(),archived:Boolean(entry.archivedAt),run_status:activeRuns.has(key)?"working":"idle",run_id:null};
+  });
+  return{agents:agentIds(api).map((id)=>({id,name:id})),sessions,messages,replace_session_messages:replaceSessionMessages};
 }
 
 async function sync(payload:Record<string,unknown>,signal?:AbortSignal){
@@ -171,7 +194,7 @@ function startAction(api:Api,action:Action,logger:Logger){
 }
 
 async function flushSync(api:Api,inventoryDue:boolean,signal:AbortSignal){
-  const base=inventoryDue?await inventory(api):{agents:[],sessions:[],messages:[]};
+  const base=inventoryDue?await inventory(api):{agents:[],sessions:[],messages:[],replace_session_messages:[]};
   const done=[...receipts.values()];
   if(!inventoryDue&&!done.length)return;
   await sync({...base,receipts:done,error:null},signal);
@@ -191,5 +214,5 @@ async function run(api:Api,logger:Logger,signal:AbortSignal){
   }
 }
 
-export const __testing={inventory,textContent,stableId};
+export const __testing={inventory,textContent,stableId,derivedTitle,history};
 export default{id:"paperchat",name:"Paperboard Chat",description:"Private Paper Pure chat bridge",register(api:Api){api.registerService({id:"paperchat-bridge",start:async()=>{controller=new AbortController();await loadState();api.logger.info("paperchat bridge starting");void run(api,api.logger,controller.signal);},stop:async()=>{controller?.abort();for(const run of activeRuns.values())run.abort();await Promise.allSettled(jobs.values());controller=undefined;}});}};

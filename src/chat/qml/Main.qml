@@ -41,6 +41,7 @@ Rectangle {
     property bool resultError: false
     property var undoAction: null
     property int refreshWeight: 0
+    property double lastBackAt: 0
 
     function uuid() {
         var seed = Date.now().toString(16) + Math.floor(Math.random() * 0x7fffffff).toString(16)
@@ -64,6 +65,22 @@ Rectangle {
         endpoint.sendMessage(1,selectedSession)
         post({id:uuid(),kind:"mark_read",session_key:selectedSession,value:true})
         ghostBuster.forceClearNow("chat open")
+    }
+    function returnToConversationList() {
+        var now=Date.now();if(now-lastBackAt<700)return
+        lastBackAt=now;conversationOpen=false;keyboardVisible=false;inputMode="message";editorText=draftText
+        selectedSession="";selectedTitle="Chat";selectedAgent="";messages=[];actions=[]
+        endpoint.sendMessage(1,"")
+        Qt.callLater(function(){ghostBuster.forceClearNow("chat list return")})
+    }
+    function visibleMessages(rows) {
+        var result=[]
+        for(var i=0;i<rows.length;i++){
+            var current=rows[i],previous=result.length?result[result.length-1]:null
+            if(current.role==="assistant"&&previous&&previous.role==="assistant"&&current.body===previous.body)continue
+            result.push(current)
+        }
+        return result
     }
     function openEditor(mode, text) { inputMode=mode; editorText=text||""; keyboardVisible=true; forceActiveFocus() }
     function submitInput() {
@@ -153,7 +170,7 @@ Rectangle {
     function applySnapshot(text) {
         try {
             var snapshot=JSON.parse(text);agents=snapshot.agents||[];sessions=snapshot.sessions||[];actions=snapshot.actions||[]
-            if(snapshot.selected_session_key===selectedSession)messages=snapshot.messages||[]
+            if(snapshot.selected_session_key===selectedSession)messages=visibleMessages(snapshot.messages||[])
             var item=currentSession();if(item){selectedTitle=item.title;selectedAgent=item.agent_id}
             statusText=snapshot.bridge&&snapshot.bridge.last_error?"Bridge issue":"Online"
             updatePending()
@@ -195,7 +212,7 @@ Rectangle {
         Rectangle {
             visible:conversationOpen;anchors.left:parent.left;anchors.leftMargin:18*unit;anchors.verticalCenter:parent.verticalCenter;width:110*unit;height:44*unit;color:backTap.pressed?ink:"#fff";border.color:ink;border.width:2*unit
             Text{anchors.centerIn:parent;text:"BACK";color:parent.color===ink?"#fff":ink;font.family:"Noto Mono";font.pixelSize:14*unit;font.bold:true}
-            MouseArea{id:backTap;anchors.fill:parent;onClicked:{conversationOpen=false;keyboardVisible=false;endpoint.sendMessage(1,"");ghostBuster.forceClearNow("chat back")}}
+            MouseArea{id:backTap;anchors.fill:parent;onClicked:root.returnToConversationList()}
         }
         Text{anchors.left:parent.left;anchors.leftMargin:conversationOpen?150*unit:28*unit;anchors.verticalCenter:parent.verticalCenter;width:parent.width-520*unit;text:conversationOpen?selectedTitle:"Chat";elide:Text.ElideRight;color:ink;font.family:"Noto Serif";font.pixelSize:30*unit;font.weight:Font.DemiBold}
         Text{anchors.right:exitButton.left;anchors.rightMargin:24*unit;anchors.verticalCenter:parent.verticalCenter;text:(currentSession()&&currentSession().run_status==="working")?"WORKING":statusText.toUpperCase();color:(statusText==="Online"&&(!currentSession()||currentSession().run_status!=="working"))?muted:accent;font.family:"Noto Mono";font.pixelSize:14*unit;font.bold:true}

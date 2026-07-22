@@ -50,6 +50,12 @@ test("Chat keeps an encrypted idempotent outbox and bounded device snapshot", as
   const snapshot = await current.app.inject({ method: "GET", url: `/v2/device/pure-one/chat/poll?cursor=0&wait=0&session=${encodeURIComponent(sessionKey)}`, headers: deviceHeaders });
   assert.equal(snapshot.json().sessions[0].title, "Private plan");
   assert.equal(snapshot.json().messages[0].body, "Ready.");
+  await current.app.inject({ method: "POST", url: "/v2/integrations/openclaw/pure-one/chat/sync", headers: clientHeaders, payload: {
+    replace_session_messages: [sessionKey],
+    messages: [{ id: "assistant-reconciled", session_key: sessionKey, role: "assistant", status: "complete", body: "Reconciled.", created_at: new Date().toISOString() }],
+  } });
+  const reconciled = await current.app.inject({ method: "GET", url: `/v2/device/pure-one/chat/poll?cursor=0&wait=0&session=${encodeURIComponent(sessionKey)}`, headers: deviceHeaders });
+  assert.deepEqual(reconciled.json().messages.map((message: { body: string }) => message.body), ["Reconciled."]);
   assert.equal((await current.app.inject({ method: "POST", url: "/v2/integrations/openclaw/pure-one/chat/actions/claim", headers: clientHeaders, payload: { worker_id: "test-worker" } })).json().action, null);
 });
 

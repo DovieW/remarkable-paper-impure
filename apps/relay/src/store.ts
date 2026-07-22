@@ -665,6 +665,7 @@ export class Store {
         VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(device_id,session_key) DO UPDATE SET agent_id=excluded.agent_id,channel=excluded.channel,
         title_enc=excluded.title_enc,updated_at=excluded.updated_at,archived=excluded.archived,run_status=excluded.run_status,run_id=excluded.run_id`)
         .run(deviceId, session.session_key, session.agent_id, session.channel, encryptSecret(session.title, this.masterKey), session.updated_at, session.archived ? 1 : 0, session.run_status, session.run_id);
+      for (const sessionKey of input.replace_session_messages) this.db.prepare("DELETE FROM chat_messages WHERE device_id=? AND session_key=?").run(deviceId, sessionKey);
       for (const message of input.messages) this.db.prepare(`INSERT INTO chat_messages(device_id,id,session_key,role,status,body_enc,asset_id,run_id,created_at,updated_at)
         VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(device_id,id) DO UPDATE SET status=excluded.status,body_enc=excluded.body_enc,
         asset_id=excluded.asset_id,run_id=excluded.run_id,updated_at=excluded.updated_at`)
