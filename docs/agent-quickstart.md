@@ -26,7 +26,7 @@ Clone and enter the repository, then inspect the bootstrap:
 
 ```bash
 git clone https://github.com/DovieW/remarkable-paper-impure.git
-cd remarkable
+cd remarkable-paper-impure
 bash -n scripts/bootstrap-ssh.sh
 scripts/bootstrap-ssh.sh --dry-run
 ```
