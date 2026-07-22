@@ -25,7 +25,7 @@ the same tablet address.
 Clone and enter the repository, then inspect the bootstrap:
 
 ```bash
-git clone https://github.com/DovieW/remarkable.git
+git clone https://github.com/DovieW/remarkable-paper-impure.git
 cd remarkable
 bash -n scripts/bootstrap-ssh.sh
 scripts/bootstrap-ssh.sh --dry-run
