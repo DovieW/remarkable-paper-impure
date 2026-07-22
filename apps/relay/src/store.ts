@@ -204,6 +204,10 @@ export class Store {
       );
     `);
     this.db.prepare("INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (6, 'encrypted-paperchat')").run();
+    const chatActionColumns = this.db.prepare("PRAGMA table_info(chat_actions)").all() as Array<{ name: string }>;
+    if (!chatActionColumns.some((column) => column.name === "worker_id")) this.db.exec("ALTER TABLE chat_actions ADD COLUMN worker_id TEXT");
+    if (!chatActionColumns.some((column) => column.name === "lease_expires_at")) this.db.exec("ALTER TABLE chat_actions ADD COLUMN lease_expires_at TEXT");
+    this.db.prepare("INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (7, 'paperchat-action-leases')").run();
   }
 
   createDevice(id: string, tokenHash: string): void {
@@ -575,6 +579,10 @@ export class Store {
   applyChatAction(deviceId: string, action: ChatAction): void {
     const now = new Date().toISOString();
     this.transaction(() => {
+      const localOnly = action.kind === "pin" || action.kind === "hide" || action.kind === "restore" || action.kind === "mark_read";
+      const inserted = this.db.prepare(`INSERT OR IGNORE INTO chat_actions(id,device_id,kind,payload_enc,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`)
+        .run(action.id, deviceId, action.kind, encryptSecret(JSON.stringify(action), this.masterKey), localOnly ? "completed" : "queued", now, now);
+      if (inserted.changes === 0) return;
       if (action.kind === "pin" || action.kind === "hide" || action.kind === "restore" || action.kind === "mark_read") {
         const column = action.kind === "pin" ? "pinned" : action.kind === "mark_read" ? "unread" : "hidden";
         const value = action.kind === "restore" ? 0 : action.kind === "mark_read" ? 0 : action.value ? 1 : 0;
@@ -589,16 +597,62 @@ export class Store {
             VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(device_id,id) DO UPDATE SET status='queued', body_enc=excluded.body_enc, updated_at=excluded.updated_at`)
             .run(deviceId, action.message_id, action.session_key, "user", "queued", encryptSecret(action.text, this.masterKey), now, now);
         }
-        this.db.prepare(`INSERT OR IGNORE INTO chat_actions(id,device_id,kind,payload_enc,created_at,updated_at) VALUES(?,?,?,?,?,?)`)
-          .run(action.id, deviceId, action.kind, encryptSecret(JSON.stringify(action), this.masterKey), now, now);
       }
       this.advanceChatCursor(deviceId);
     });
   }
 
-  pendingChatActions(deviceId: string): ChatAction[] {
-    const rows = this.db.prepare("SELECT payload_enc FROM chat_actions WHERE device_id=? AND status='queued' ORDER BY created_at LIMIT 100").all(deviceId) as Array<{ payload_enc: string }>;
-    return rows.map((row) => JSON.parse(decryptSecret(row.payload_enc, this.masterKey)) as ChatAction);
+  claimChatAction(deviceId: string, workerId: string, leaseSeconds: number): (ChatAction & { lease_expires_at: string; attempts: number }) | null {
+    return this.transaction(() => {
+      const now = new Date().toISOString();
+      const expired = this.db.prepare(`SELECT id,payload_enc FROM chat_actions WHERE device_id=? AND status='processing' AND lease_expires_at IS NOT NULL AND lease_expires_at<=?`)
+        .all(deviceId, now) as Array<{ id: string; payload_enc: string }>;
+      for (const row of expired) {
+        this.db.prepare(`UPDATE chat_actions SET status='failed',detail='Bridge interrupted; retry explicitly.',worker_id=NULL,lease_expires_at=NULL,updated_at=? WHERE id=?`)
+          .run(now, row.id);
+        const action = JSON.parse(decryptSecret(row.payload_enc, this.masterKey)) as ChatAction;
+        if (action.kind === "send" || action.kind === "retry") this.db.prepare("UPDATE chat_messages SET status='failed',updated_at=? WHERE device_id=? AND id=?")
+          .run(now, deviceId, action.message_id);
+      }
+      if (expired.length) this.advanceChatCursor(deviceId);
+      const row = this.db.prepare("SELECT id,payload_enc FROM chat_actions WHERE device_id=? AND status='queued' ORDER BY created_at LIMIT 1")
+        .get(deviceId) as { id: string; payload_enc: string } | undefined;
+      if (!row) return null;
+      const leaseExpiresAt = new Date(Date.now() + leaseSeconds * 1000).toISOString();
+      const claimed = this.db.prepare(`UPDATE chat_actions SET status='processing',attempts=attempts+1,worker_id=?,lease_expires_at=?,detail='',updated_at=?
+        WHERE device_id=? AND id=? AND status='queued'`).run(workerId, leaseExpiresAt, now, deviceId, row.id);
+      if (claimed.changes !== 1) return null;
+      const action = JSON.parse(decryptSecret(row.payload_enc, this.masterKey)) as ChatAction;
+      if (action.kind === "send" || action.kind === "retry") this.db.prepare("UPDATE chat_messages SET status='streaming',updated_at=? WHERE device_id=? AND id=?")
+        .run(now, deviceId, action.message_id);
+      const attempts = Number((this.db.prepare("SELECT attempts FROM chat_actions WHERE id=?").get(row.id) as { attempts: number }).attempts);
+      this.advanceChatCursor(deviceId);
+      return { ...action, lease_expires_at: leaseExpiresAt, attempts };
+    });
+  }
+
+  renewChatActionLease(deviceId: string, actionId: string, workerId: string, leaseSeconds: number): boolean {
+    const now = new Date().toISOString();
+    const leaseExpiresAt = new Date(Date.now() + leaseSeconds * 1000).toISOString();
+    return this.db.prepare(`UPDATE chat_actions SET lease_expires_at=?,updated_at=?
+      WHERE device_id=? AND id=? AND status='processing' AND worker_id=?`).run(leaseExpiresAt, now, deviceId, actionId, workerId).changes === 1;
+  }
+
+  deleteChatSession(deviceId: string, sessionKey: string): boolean {
+    return this.transaction(() => {
+      const exists = this.db.prepare("SELECT 1 FROM chat_sessions WHERE device_id=? AND session_key=?")
+        .get(deviceId, sessionKey);
+      if (!exists) return false;
+      const actions = this.db.prepare("SELECT id,payload_enc FROM chat_actions WHERE device_id=?")
+        .all(deviceId) as Array<{ id: string; payload_enc: string }>;
+      for (const row of actions) {
+        const action = JSON.parse(decryptSecret(row.payload_enc, this.masterKey)) as ChatAction;
+        if (action.session_key === sessionKey) this.db.prepare("DELETE FROM chat_actions WHERE id=?").run(row.id);
+      }
+      this.db.prepare("DELETE FROM chat_sessions WHERE device_id=? AND session_key=?").run(deviceId, sessionKey);
+      this.advanceChatCursor(deviceId);
+      return true;
+    });
   }
 
   syncChat(deviceId: string, input: ChatBridgeSync): void {
@@ -615,8 +669,16 @@ export class Store {
         VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(device_id,id) DO UPDATE SET status=excluded.status,body_enc=excluded.body_enc,
         asset_id=excluded.asset_id,run_id=excluded.run_id,updated_at=excluded.updated_at`)
         .run(deviceId, message.id, message.session_key, message.role, message.status, encryptSecret(message.body, this.masterKey), message.asset_id, message.run_id, message.created_at, now);
-      for (const receipt of input.receipts) this.db.prepare("UPDATE chat_actions SET status=?,detail=?,updated_at=? WHERE device_id=? AND id=?")
-        .run(receipt.status, receipt.detail, now, deviceId, receipt.id);
+      for (const receipt of input.receipts) {
+        const row = this.db.prepare("SELECT payload_enc FROM chat_actions WHERE device_id=? AND id=?").get(deviceId, receipt.id) as { payload_enc: string } | undefined;
+        this.db.prepare("UPDATE chat_actions SET status=?,detail=?,worker_id=NULL,lease_expires_at=NULL,updated_at=? WHERE device_id=? AND id=? AND status NOT IN ('completed','failed')")
+          .run(receipt.status, receipt.detail, now, deviceId, receipt.id);
+        if (row) {
+          const action = JSON.parse(decryptSecret(row.payload_enc, this.masterKey)) as ChatAction;
+          if (action.kind === "send" || action.kind === "retry") this.db.prepare("UPDATE chat_messages SET status=?,updated_at=? WHERE device_id=? AND id=?")
+            .run(receipt.status === "completed" ? "complete" : "failed", now, deviceId, action.message_id);
+        }
+      }
       this.db.prepare(`INSERT INTO chat_bridge_state(device_id,last_seen_at,last_error) VALUES(?,?,?)
         ON CONFLICT(device_id) DO UPDATE SET last_seen_at=excluded.last_seen_at,last_error=excluded.last_error`).run(deviceId, now, input.error);
       for (const session of input.sessions) this.db.prepare(`DELETE FROM chat_messages WHERE rowid IN (SELECT rowid FROM chat_messages WHERE device_id=? AND session_key=? ORDER BY created_at DESC LIMIT -1 OFFSET 500)`).run(deviceId, session.session_key);
@@ -637,7 +699,12 @@ export class Store {
       ...(row.asset_id ? { asset_url: `/v2/device/${deviceId}/assets/${row.asset_id}` } : {}), run_id: row.run_id, created_at: row.created_at,
     })) : [];
     const bridge = this.db.prepare("SELECT last_seen_at,last_error FROM chat_bridge_state WHERE device_id=?").get(deviceId) as Record<string, unknown> | undefined;
-    return { cursor: this.chatCursor(deviceId), agents, sessions, selected_session_key: selected || null, messages, bridge: bridge ?? null };
+    const actions = selected ? (this.db.prepare("SELECT id,kind,status,attempts,detail,payload_enc,updated_at FROM chat_actions WHERE device_id=? ORDER BY updated_at DESC LIMIT 100").all(deviceId) as Array<Record<string, unknown>>)
+      .flatMap((row) => {
+        const action = JSON.parse(decryptSecret(String(row.payload_enc), this.masterKey)) as ChatAction;
+        return action.session_key === selected ? [{ id: row.id, kind: row.kind, status: row.status, attempts: row.attempts, detail: row.detail, updated_at: row.updated_at, ...(action.kind === "send" || action.kind === "retry" ? { message_id: action.message_id } : {}) }] : [];
+      }).slice(0, 25) : [];
+    return { cursor: this.chatCursor(deviceId), agents, sessions, selected_session_key: selected || null, messages, actions, bridge: bridge ?? null };
   }
 
   cleanup(): void {

@@ -1,1 +1,1 @@
-<RCC><qresource><file>qml/Main.qml</file></qresource></RCC>
+<RCC><qresource><file>qml/Main.qml</file><file alias="qml/OnScreenKeyboard.qml">../shared/qml/OnScreenKeyboard.qml</file></qresource></RCC>

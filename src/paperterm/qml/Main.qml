@@ -512,167 +512,24 @@ Rectangle {
                 }
             }
 
-            Rectangle {
+            OnScreenKeyboard {
                 id: keyboard
                 visible: root.keyboardVisible
                 width: parent.width
                 height: 470 * unit
-                color: "#f4f4ef"
-                border.color: rule
-                border.width: 1
-
-                Rectangle {
-                    id: macroRail
-                    visible: root.macros.length > 0
-                    anchors.left: parent.left
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    width: visible ? 132 * unit : 0
-                    color: soft
-
-                    Rectangle {
-                        anchors.right: parent.right
-                        width: 1 * unit
-                        height: parent.height
-                        color: rule
-                    }
-
-                    Column {
-                        anchors.fill: parent
-                        anchors.margins: 12 * unit
-                        spacing: 8 * unit
-                        Repeater {
-                            model: root.macros
-                            delegate: Rectangle {
-                                required property var modelData
-                                width: parent.width
-                                height: (macroRail.height - 24 * unit - Math.max(0, root.macros.length - 1) * 8 * unit) / Math.max(1, root.macros.length)
-                                color: macroTap.pressed ? ink : paper
-                                border.color: ink
-                                border.width: 2 * unit
-                                radius: 2 * unit
-                                Text {
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.margins: 6 * unit
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: modelData.label
-                                    color: parent.color === root.ink ? root.paper : root.ink
-                                    font.family: "Noto Sans Mono"
-                                    font.pixelSize: 16 * unit
-                                    font.bold: true
-                                    elide: Text.ElideRight
-                                    horizontalAlignment: Text.AlignHCenter
-                                }
-                                MouseArea {
-                                    id: macroTap
-                                    anchors.fill: parent
-                                    onClicked: {
-                                        root.sendMacro(modelData)
-                                        root.changed(1)
-                                    }
-                                }
-                            }
-                        }
-                    }
+                terminalMode: true
+                unitScale: root.unit
+                macros: root.macros
+                ink: root.ink; paper: root.paper; rule: root.rule; soft: root.soft
+                onTextRequested: function(value, ctrl, alt) {
+                    root.ctrlHeld=ctrl; root.altHeld=alt; root.shiftHeld=false
+                    root.sendText(value); root.changed(1)
                 }
-
-                Column {
-                    id: keyboardRows
-                    anchors.left: macroRail.right
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    anchors.margins: 12 * unit
-                    spacing: 9 * unit
-
-                    Row {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        spacing: 8 * unit
-                        Repeater {
-                            model: [
-                                {label:"HOME", action:"home"}, {label:"PGUP", action:"pageup"},
-                                {label:"←", action:"left"}, {label:"↑", action:"up"},
-                                {label:"↓", action:"down"}, {label:"→", action:"right"},
-                                {label:"PGDN", action:"pagedown"}, {label:"END", action:"end"},
-                                {label:"DEL", action:"delete"}
-                            ]
-                            delegate: Rectangle {
-                                required property var modelData
-                                width: 116 * unit; height: 58 * unit
-                                color: paper; border.color: "#777770"; radius: 2 * unit
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: modelData.label
-                                    color: ink
-                                    font.family: terminalFont.name.length ? terminalFont.name : "Noto Mono"
-                                    font.pixelSize: 18 * unit; font.bold: true
-                                }
-                                MouseArea { anchors.fill: parent; onClicked: root.sendKey(modelData.action) }
-                            }
-                        }
-                    }
-
-                    Repeater {
-                        model: root.symbolLayer
-                            ? ["1234567890-+=", "[]{}()<>/\\|", "`~!@#$%^&*_:;"]
-                            : ["1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm,./"]
-                        delegate: Row {
-                            required property string modelData
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            spacing: 8 * unit
-                            Repeater {
-                                model: modelData.split("")
-                                delegate: Rectangle {
-                                    required property string modelData
-                                    width: Math.min(103 * unit, (keyboardRows.width - 70 * unit) / 14)
-                                    height: 68 * unit
-                                    color: paper; border.color: "#777770"; radius: 2 * unit
-                                    Text { anchors.centerIn: parent; text: root.shiftHeld ? modelData.toUpperCase() : modelData; color: ink; font.family: "Noto Sans Mono"; font.pixelSize: 25 * unit; font.bold: true }
-                                    MouseArea { anchors.fill: parent; onClicked: root.sendText(modelData) }
-                                }
-                            }
-                        }
-                    }
-
-                    Row {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        spacing: 9 * unit
-                        Repeater {
-                            model: [
-                                {label:"ESC", action:"escape", wide:1}, {label:"CTRL", action:"ctrl", wide:1},
-                                {label:"ALT", action:"alt", wide:1}, {label:"SHIFT", action:"shift", wide:1},
-                                {label:"SYM", action:"symbol", wide:1}, {label:"TAB", action:"tab", wide:1},
-                                {label:"SPACE", action:"space", wide:3}, {label:"BKSP", action:"backspace", wide:1},
-                                {label:"ENTER", action:"enter", wide:2}
-                            ]
-                            delegate: Rectangle {
-                                required property var modelData
-                                width: 83 * unit * modelData.wide
-                                height: 68 * unit
-                                color: (modelData.action === "ctrl" && root.ctrlHeld) ||
-                                       (modelData.action === "alt" && root.altHeld) ||
-                                       (modelData.action === "shift" && root.shiftHeld) ||
-                                       (modelData.action === "symbol" && root.symbolLayer) ? ink : paper
-                                border.color: ink; radius: 2 * unit
-                                Text { anchors.centerIn: parent; text: modelData.label; color: parent.color === root.ink ? root.paper : root.ink; font.pixelSize: 18 * unit; font.bold: true }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: {
-                                        if (modelData.action === "ctrl") root.ctrlHeld = !root.ctrlHeld
-                                        else if (modelData.action === "alt") root.altHeld = !root.altHeld
-                                        else if (modelData.action === "shift") root.shiftHeld = !root.shiftHeld
-                                        else if (modelData.action === "symbol") root.symbolLayer = !root.symbolLayer
-                                        else if (modelData.action === "space" && root.ctrlHeld) root.sendKey("space")
-                                        else if (modelData.action === "space") root.sendText(" ")
-                                        else root.sendKey(modelData.action)
-                                        root.changed(1)
-                                    }
-                                }
-                            }
-                        }
-                    }
+                onKeyRequested: function(value, ctrl, alt, shift) {
+                    root.ctrlHeld=ctrl; root.altHeld=alt; root.shiftHeld=shift
+                    root.sendKey(value); root.changed(1)
                 }
+                onMacroRequested: function(macro) { root.sendMacro(macro); root.changed(1) }
             }
         }
 

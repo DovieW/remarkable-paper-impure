@@ -6,8 +6,9 @@ stock notebook UI, Paperboard, Canvas, or PaperTerm.
 
 ## Behavior
 
-- Opening Chat shows a full-screen conversation list. Selecting a row opens a
-  full-screen conversation.
+- Opening Chat shows Inbox, Archived, and Removed views. Archived conversations
+  stay synchronized with OpenClaw; Removed is a reversible tablet-local state.
+  Selecting a row opens the full-screen conversation.
 - New chats use a `paperchat:` session key and a selected OpenClaw agent.
 - Existing OpenClaw sessions can be viewed and continued. Continuations use
   `deliver: false`, so a reply requested from Chat stays in Chat instead of
@@ -16,10 +17,20 @@ stock notebook UI, Paperboard, Canvas, or PaperTerm.
 - The private relay cache is bounded to 100 conversations and 500 messages per
   conversation. Titles, bodies, and queued action payloads are AES-256-GCM
   encrypted with the relay master key.
-- The outbox uses stable UUIDs. Reconnect retries cannot enqueue the same action
-  twice.
-- Search and pin are local. Rename and archive are applied to OpenClaw. Hide is
-  a reversible local alternative to destructive deletion.
+- The outbox uses stable UUIDs. The relay atomically leases each action to one
+  bridge worker, and an interrupted lease fails closed instead of replaying a
+  prompt. Retry is always an explicit user action.
+- Assistant streaming and final updates reuse one deterministic message ID, so
+  a final response replaces its streaming row instead of becoming a duplicate.
+- Search, pin, and Remove are local. Rename and archive are applied to OpenClaw.
+- The top bar contains navigation and app controls; the second row contains
+  state-aware conversation actions. Every asynchronous action exposes a
+  pressed, pending, and final result state. Stop appears only while work is in
+  progress, Retry only for a failed user message, and Regenerate only for a
+  successfully completed user message.
+- Chat and PaperTerm share the same native on-screen keyboard component. Chat
+  uses its docked text layout while PaperTerm adds terminal navigation,
+  modifiers, and macros.
 
 The first release supports typed messages and rendered Markdown text. Image
 attachments and tablet-originated image uploads are deliberately deferred; the
@@ -34,6 +45,13 @@ Chat AppLoad app -> private Paperboard relay -> paperchat OpenClaw plugin
 The existing relay container owns the encrypted cache and outbox. No additional
 NAS container, VM, public port, or Tailscale Funnel is required. The plugin is a
 small bundled JavaScript artifact loaded into the existing OpenClaw gateway.
+
+The bridge keeps a mode-0600 state file at
+`~/.openclaw/paperchat-bridge-state.json` by default. It records only the
+session keys created or adopted by Chat, allowing inventory refreshes to avoid
+re-importing those sessions as duplicate history. Override the location with
+`PAPERCHAT_STATE_PATH` only when the service account needs a different private
+state directory.
 
 ## Build and deploy
 
@@ -81,6 +99,26 @@ Set `openclaw_paperchat_enabled: true` in private Ansible inventory after the
 artifact and environment file exist. The role verifies the pinned checksum,
 installs the extension and protected environment, allowlists `paperchat`, and
 restarts the existing gateway.
+
+## Recovery and cleanup
+
+If the bridge is restarted while an action is processing, the relay marks that
+action failed after its lease expires. It is not automatically replayed. The
+owner can inspect the failure in Chat and choose Retry or Regenerate.
+
+Removing one damaged test conversation is a maintenance operation, not a
+tablet feature. Back up both the relay database and the corresponding OpenClaw
+session first. Then delete the OpenClaw session and call the relay's
+loopback-only, bearer-authenticated admin endpoint:
+
+```text
+DELETE /admin/devices/{device}/chat/sessions/{url-encoded-session-key}
+```
+
+The endpoint removes that session's encrypted cache, messages, and pending or
+completed action records. It is intentionally unavailable on the public relay
+listener. Do not add the admin token to a command line or shell history; source
+the ignored token file in a subshell.
 
 ## Disable, uninstall, and recovery
 

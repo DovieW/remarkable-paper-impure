@@ -1,5 +1,6 @@
 <RCC>
   <qresource prefix="/">
     <file>qml/Main.qml</file>
+    <file alias="qml/OnScreenKeyboard.qml">../shared/qml/OnScreenKeyboard.qml</file>
   </qresource>
 </RCC>

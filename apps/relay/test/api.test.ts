@@ -37,9 +37,8 @@ test("Chat keeps an encrypted idempotent outbox and bounded device snapshot", as
   const action = { id: "42ffae12-2e97-4bd2-9fdf-73e37152cbd8", kind: "create", session_key: sessionKey, agent_id: "main", title: "Private plan" };
   assert.equal((await current.app.inject({ method: "POST", url: "/v2/device/pure-one/chat/actions", headers: deviceHeaders, payload: action })).statusCode, 202);
   assert.equal((await current.app.inject({ method: "POST", url: "/v2/device/pure-one/chat/actions", headers: deviceHeaders, payload: action })).statusCode, 202);
-  const queued = await current.app.inject({ method: "GET", url: "/v2/integrations/openclaw/pure-one/chat/poll", headers: clientHeaders });
-  assert.equal(queued.json().actions.length, 1);
-  assert.equal(queued.json().actions[0].title, "Private plan");
+  const queued = await current.app.inject({ method: "POST", url: "/v2/integrations/openclaw/pure-one/chat/actions/claim", headers: clientHeaders, payload: { worker_id: "test-worker" } });
+  assert.equal(queued.json().action.title, "Private plan");
   const raw = current.store.db.prepare("SELECT title_enc,payload_enc FROM chat_sessions JOIN chat_actions USING(device_id) WHERE chat_sessions.device_id=?").get("pure-one") as { title_enc: string; payload_enc: string };
   assert.equal(raw.title_enc.includes("Private plan"), false);
   assert.equal(raw.payload_enc.includes("Private plan"), false);
@@ -51,7 +50,45 @@ test("Chat keeps an encrypted idempotent outbox and bounded device snapshot", as
   const snapshot = await current.app.inject({ method: "GET", url: `/v2/device/pure-one/chat/poll?cursor=0&wait=0&session=${encodeURIComponent(sessionKey)}`, headers: deviceHeaders });
   assert.equal(snapshot.json().sessions[0].title, "Private plan");
   assert.equal(snapshot.json().messages[0].body, "Ready.");
-  assert.equal((await current.app.inject({ method: "GET", url: "/v2/integrations/openclaw/pure-one/chat/poll", headers: clientHeaders })).json().actions.length, 0);
+  assert.equal((await current.app.inject({ method: "POST", url: "/v2/integrations/openclaw/pure-one/chat/actions/claim", headers: clientHeaders, payload: { worker_id: "test-worker" } })).json().action, null);
+});
+
+test("Chat claims each action once and does not replay an expired lease", async (context) => {
+  const current = fixture();
+  context.after(async () => { await current.adminApp.close(); await current.app.close(); rmSync(current.root, { recursive: true, force: true }); });
+  const credentials = await provision(current.adminApp, current.config.adminToken);
+  const deviceHeaders = { authorization: `Bearer ${credentials.deviceToken}` };
+  const clientHeaders = { authorization: `Bearer ${credentials.clientToken}` };
+  const sessionKey = "paperchat:lease-session-0001";
+  await current.app.inject({ method: "POST", url: "/v2/device/pure-one/chat/actions", headers: deviceHeaders, payload: { id: "e663306d-f98a-4421-80a7-f72e5989689f", kind: "create", session_key: sessionKey, agent_id: "main", title: "Lease test" } });
+  const claims = await Promise.all(["worker-one", "worker-two"].map((worker_id) => current.app.inject({ method: "POST", url: "/v2/integrations/openclaw/pure-one/chat/actions/claim", headers: clientHeaders, payload: { worker_id, lease_seconds: 45 } })));
+  assert.equal(claims.filter((response) => response.json().action !== null).length, 1);
+  const owner = claims.find((response) => response.json().action !== null)!.json().action;
+  assert.equal(owner.attempts, 1);
+  assert.equal((await current.app.inject({ method: "POST", url: `/v2/integrations/openclaw/pure-one/chat/actions/${owner.id}/lease`, headers: clientHeaders, payload: { worker_id: "wrong-worker" } })).statusCode, 409);
+  current.store.db.prepare("UPDATE chat_actions SET lease_expires_at=? WHERE id=?").run("2000-01-01T00:00:00.000Z", owner.id);
+  const afterExpiry = await current.app.inject({ method: "POST", url: "/v2/integrations/openclaw/pure-one/chat/actions/claim", headers: clientHeaders, payload: { worker_id: "worker-three" } });
+  assert.equal(afterExpiry.json().action, null);
+  const action = current.store.db.prepare("SELECT status,attempts,detail FROM chat_actions WHERE id=?").get(owner.id) as { status: string; attempts: number; detail: string };
+  assert.equal(action.status, "failed");
+  assert.equal(action.attempts, 1);
+  assert.equal(action.detail, "Bridge interrupted; retry explicitly.");
+});
+
+test("Chat session cleanup is admin-only and removes its encrypted cache and actions", async (context) => {
+  const current = fixture();
+  context.after(async () => { await current.adminApp.close(); await current.app.close(); rmSync(current.root, { recursive: true, force: true }); });
+  const credentials = await provision(current.adminApp, current.config.adminToken);
+  const sessionKey = "paperchat:disposable-session-0001";
+  await current.app.inject({ method: "POST", url: "/v2/device/pure-one/chat/actions", headers: { authorization: `Bearer ${credentials.deviceToken}` }, payload: {
+    id: "16f1051a-7ce4-4c08-92b5-7293eed80681", kind: "create", session_key: sessionKey, agent_id: "main", title: "Disposable",
+  } });
+  assert.equal((await current.adminApp.inject({ method: "DELETE", url: `/admin/devices/pure-one/chat/sessions/${encodeURIComponent(sessionKey)}` })).statusCode, 401);
+  const removed = await current.adminApp.inject({ method: "DELETE", url: `/admin/devices/pure-one/chat/sessions/${encodeURIComponent(sessionKey)}`, headers: { authorization: `Bearer ${current.config.adminToken}` } });
+  assert.equal(removed.statusCode, 200);
+  assert.equal(removed.json().deleted, true);
+  assert.equal(current.store.db.prepare("SELECT count(*) AS count FROM chat_sessions WHERE device_id=? AND session_key=?").get("pure-one", sessionKey).count, 0);
+  assert.equal(current.store.db.prepare("SELECT count(*) AS count FROM chat_actions WHERE device_id=?").get("pure-one").count, 0);
 });
 
 test("tablet bridge is scope protected and validates installed-app control responses", async (context) => {

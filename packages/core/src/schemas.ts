@@ -66,10 +66,21 @@ export const CHAT_MESSAGE_MAX_BYTES = 16 * 1024;
 export const chatActionSchema = z.discriminatedUnion("kind", [
   z.object({ id: z.string().uuid(), kind: z.literal("create"), session_key: z.string().min(8).max(240), agent_id: z.string().min(1).max(160), title: z.string().trim().min(1).max(160) }),
   z.object({ id: z.string().uuid(), kind: z.enum(["send", "retry"]), session_key: z.string().min(8).max(240), message_id: z.string().uuid(), text: z.string().min(1).max(CHAT_MESSAGE_MAX_BYTES) }),
+  z.object({ id: z.string().uuid(), kind: z.literal("regenerate"), session_key: z.string().min(8).max(240), text: z.string().min(1).max(CHAT_MESSAGE_MAX_BYTES) }),
   z.object({ id: z.string().uuid(), kind: z.literal("abort"), session_key: z.string().min(8).max(240) }),
   z.object({ id: z.string().uuid(), kind: z.literal("rename"), session_key: z.string().min(8).max(240), title: z.string().trim().min(1).max(160) }),
   z.object({ id: z.string().uuid(), kind: z.enum(["archive", "pin", "hide", "restore", "mark_read"]), session_key: z.string().min(8).max(240), value: z.boolean().default(true) }),
 ]);
+
+export const chatActionClaimSchema = z.object({
+  worker_id: z.string().trim().min(3).max(160),
+  lease_seconds: z.coerce.number().int().min(15).max(120).default(45),
+});
+
+export const chatActionLeaseSchema = z.object({
+  worker_id: z.string().trim().min(3).max(160),
+  lease_seconds: z.coerce.number().int().min(15).max(120).default(45),
+});
 
 export const chatBridgeSyncSchema = z.object({
   agents: z.array(z.object({ id: z.string().min(1).max(160), name: z.string().trim().min(1).max(160) })).max(100).default([]),

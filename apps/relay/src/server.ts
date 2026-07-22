@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { createHash, randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
-import { canvasEventInputSchema, canvasMessageInputSchema, canvasSessionInputSchema, cardInputSchema, cardPatchSchema, chatActionSchema, chatBridgeSyncSchema, clientScopeSchema, commandResultSchema, DEVICE_ID_PATTERN, devicePollQuerySchema, hashToken, issueToken, paperboardCommandSchema, paperboardUiStateSchema, providerSchema, tabletLaunchSchema } from "@paperboard/core";
+import { canvasEventInputSchema, canvasMessageInputSchema, canvasSessionInputSchema, cardInputSchema, cardPatchSchema, chatActionClaimSchema, chatActionLeaseSchema, chatActionSchema, chatBridgeSyncSchema, clientScopeSchema, commandResultSchema, DEVICE_ID_PATTERN, devicePollQuerySchema, hashToken, issueToken, paperboardCommandSchema, paperboardUiStateSchema, providerSchema, tabletLaunchSchema } from "@paperboard/core";
 import { z } from "zod";
 import { requireAdmin, requireDevice, requireScope } from "./auth.js";
 import type { RelayConfig } from "./config.js";
@@ -20,6 +20,8 @@ const idemSchema = z.string().min(8).max(160);
 const sessionParamSchema = deviceParamSchema.extend({ session: z.string().min(8).max(80) });
 const eventParamSchema = sessionParamSchema.extend({ event: z.string().min(8).max(80) });
 const commandParamSchema = deviceParamSchema.extend({ command: z.string().min(8).max(80) });
+const chatActionParamSchema = deviceParamSchema.extend({ action: z.string().uuid() });
+const adminChatSessionParamSchema = deviceParamSchema.extend({ session: z.string().min(8).max(240) });
 const readerBookmarkSchema = z.object({
   url: z.string().url().max(2048).refine((value) => {
     const url = new URL(value);
@@ -349,12 +351,24 @@ export function buildServer(config: RelayConfig): RelayServer {
     } catch (error) { return bad(reply, error); }
   });
 
-  app.get("/v2/integrations/openclaw/:device/chat/poll", async (request, reply) => {
+  app.post("/v2/integrations/openclaw/:device/chat/actions/claim", async (request, reply) => {
     if (!client(request, "chat:bridge:read")) return deny(reply);
     try {
       const { device } = deviceParamSchema.parse(request.params);
       if (!store.getDevice(device)) return reply.code(404).send({ error: "device not found" });
-      return { actions: store.pendingChatActions(device), server_time: new Date().toISOString() };
+      const input = chatActionClaimSchema.parse(request.body);
+      return { action: store.claimChatAction(device, input.worker_id, input.lease_seconds), server_time: new Date().toISOString() };
+    } catch (error) { return bad(reply, error); }
+  });
+
+  app.post("/v2/integrations/openclaw/:device/chat/actions/:action/lease", async (request, reply) => {
+    if (!client(request, "chat:bridge:write")) return deny(reply);
+    try {
+      const { device, action } = chatActionParamSchema.parse(request.params);
+      const input = chatActionLeaseSchema.parse(request.body);
+      return store.renewChatActionLease(device, action, input.worker_id, input.lease_seconds)
+        ? reply.code(204).send()
+        : reply.code(409).send({ error: "action is not owned by this worker" });
     } catch (error) { return bad(reply, error); }
   });
 
@@ -564,6 +578,14 @@ export function buildServer(config: RelayConfig): RelayServer {
     if (!providers.set(device, provider)) return reply.code(404).send({ error: "device not found" });
     changes.emit(device);
     return { device, provider: provider.kind };
+  });
+
+  adminApp.delete("/admin/devices/:device/chat/sessions/:session", async (request, reply) => {
+    if (!requireAdmin(request, config.adminToken)) return deny(reply);
+    const { device, session } = adminChatSessionParamSchema.parse(request.params);
+    if (!store.deleteChatSession(device, session)) return reply.code(404).send({ error: "chat session not found" });
+    changes.emit(device);
+    return receipt(request, "admin.chat.session.delete", { device, deleted: true });
   });
 
   const cleanup = setInterval(() => store.cleanup(), 60_000);

@@ -36,3 +36,23 @@ test("inventory bounds visible sessions and imports only user-facing history", a
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("owned PaperChat sessions are not re-imported and action message ids are stable", async () => {
+  const root = await mkdtemp(join(tmpdir(), "paperchat-owned-"));
+  try {
+    const transcript = join(root, "session.jsonl");
+    await writeFile(transcript, JSON.stringify({ id: "duplicate", timestamp: "2026-07-21T20:00:00.000Z", message: { role: "user", content: "Do not import me again" } }), { mode: 0o600 });
+    const sessionKey = "paperchat:owned-session";
+    const api = {
+      config: { agents: { list: [] } },
+      runtime: { agent: { session: { listSessionEntries: () => [{ sessionKey, entry: { sessionFile: transcript, updatedAt: 40 } }] } } },
+    };
+    const result = await __testing.inventory(api, new Map([[sessionKey, "2026-07-21T19:00:00.000Z"]]));
+    assert.equal(result.sessions.length, 1);
+    assert.deepEqual(result.messages, []);
+    assert.equal(__testing.stableId(sessionKey, "assistant", "same-action"), __testing.stableId(sessionKey, "assistant", "same-action"));
+    assert.notEqual(__testing.stableId(sessionKey, "assistant", "same-action"), __testing.stableId(sessionKey, "assistant", "other-action"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -99,15 +99,16 @@ grep -Fq 'height: 54 * unit' "$ROOT/src/paperterm/qml/Main.qml" \
   || die 'the profile list should not have an unnecessary title'
 ! grep -Fq 'Only saved key-based connections appear here' "$ROOT/src/paperterm/qml/Main.qml" \
   || die 'the profile list should not have explanatory subtext'
+keyboard_qml="$ROOT/src/shared/qml/OnScreenKeyboard.qml"
 for key_name in home end pageup pagedown left right up down delete; do
-  grep -Fq "action:\"$key_name\"" "$ROOT/src/paperterm/qml/Main.qml" \
+  grep -Fq "key:\"$key_name\"" "$keyboard_qml" \
     || die "on-screen navigation key is missing: $key_name"
 done
-grep -Fq 'id: macroRail' "$ROOT/src/paperterm/qml/Main.qml" \
+grep -Fq 'id: macroRail' "$keyboard_qml" \
   || die 'the left-aligned macro rail is missing'
-grep -Fq 'root.sendMacro(modelData)' "$ROOT/src/paperterm/qml/Main.qml" \
+grep -Fq 'onMacroRequested: function(macro)' "$ROOT/src/paperterm/qml/Main.qml" \
   || die 'macro buttons do not emit structured key chords'
-grep -Fq 'root.sendKey("space")' "$ROOT/src/paperterm/qml/Main.qml" \
+grep -Fq 'keyboard.emitKey("space")' "$keyboard_qml" \
   || die 'on-screen Ctrl+Space does not use the structured key path'
 grep -Fq 'Qt.Key_Space && (event.modifiers & Qt.ControlModifier)' "$ROOT/src/paperterm/qml/Main.qml" \
   || die 'physical Ctrl+Space does not use the structured key path'
