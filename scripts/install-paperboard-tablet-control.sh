@@ -69,6 +69,7 @@ case "$action" in
     ps | grep -F 'backend/entry /tmp/paperboard.sock' | grep -v grep >/dev/null && foreground=paperboard
     ps | grep -F 'backend/entry /tmp/canvas.sock' | grep -v grep >/dev/null && foreground=canvas
     ps | grep -F 'backend/entry /tmp/paperterm.sock' | grep -v grep >/dev/null && foreground=paperterm
+    ps | grep -F 'backend/entry /tmp/chat.sock' | grep -v grep >/dev/null && foreground=chat
     printf '{"platform":"%s","architecture":"%s","foreground":"%s","launch_available":%s,"screenshot_available":%s}\n' \
       "$(hostname)" "$(uname -m)" "$foreground" \
       "$(test -d /run/paperboard-appload && echo true || echo false)" \
@@ -98,7 +99,7 @@ case "$action" in
     printf '{"queued":true,"app":"%s"}\n' "$argument"
     ;;
   return)
-    for socket in paperboard canvas paperterm; do
+    for socket in paperboard canvas paperterm chat; do
       ps | awk -v target="backend/entry /tmp/$socket.sock" 'index($0, target) { print $1 }' \
         | while IFS= read -r pid; do
             case "$pid" in ''|*[!0-9]*) continue;; esac

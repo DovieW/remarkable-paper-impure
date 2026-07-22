@@ -37,6 +37,7 @@ foreground=stock
 ps | grep -F 'backend/entry /tmp/paperboard.sock' | grep -v grep >/dev/null && foreground=paperboard
 ps | grep -F 'backend/entry /tmp/canvas.sock' | grep -v grep >/dev/null && foreground=canvas
 ps | grep -F 'backend/entry /tmp/paperterm.sock' | grep -v grep >/dev/null && foreground=paperterm
+ps | grep -F 'backend/entry /tmp/chat.sock' | grep -v grep >/dev/null && foreground=chat
 locked=unknown
 printf '{"platform":"%s","architecture":"%s","foreground":"%s","lock_state":"%s","screenshot":%s,"input_helper":%s}\n' \
   "$platform" "$architecture" "$foreground" "$locked" \

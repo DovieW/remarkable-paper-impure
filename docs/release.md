@@ -24,10 +24,10 @@ scripts/remarkable package --version VERSION --skip-build
 (cd build/releases/VERSION && sha256sum -c SHA256SUMS)
 ```
 
-The release directory contains Paperboard and PaperTerm archives, a checksum
-file, and a machine-readable manifest tying the artifacts to a Git commit and
-the `imx93-tatsu`/`aarch64` target. Object files, owner profiles, tokens, and
-other local configuration are excluded.
+The release directory contains Paperboard, PaperTerm, and Chat archives, a
+checksum file, and a machine-readable manifest tying the artifacts to a Git
+commit and the `imx93-tatsu`/`aarch64` target. Object files, owner profiles,
+tokens, and other local configuration are excluded.
 
 Then, with USB preferred:
 
@@ -39,6 +39,8 @@ scripts/deploy-paperboard.sh --host remarkable-usb --dry-run
 scripts/deploy-paperboard.sh --host remarkable-usb
 scripts/deploy-paperterm.sh --host remarkable-usb --dry-run
 scripts/deploy-paperterm.sh --host remarkable-usb
+scripts/deploy-chat.sh --host remarkable-usb --dry-run
+scripts/deploy-chat.sh --host remarkable-usb
 scripts/paperboard-doctor.sh --host remarkable-usb
 scripts/device-smoke-test.sh --host remarkable-usb
 ```
@@ -49,7 +51,8 @@ installation result, activation policy, and rollback availability. Deployment
 restarts the Xovi-managed UI services so AppLoad loads new resources. This does
 not reboot the tablet, but it briefly interrupts the stock UI. Paperboard may
 be activated explicitly; PaperTerm is never remotely launched. Reserve
-`--no-restart-xovi` for a verified backend-only build.
+`--no-restart-xovi` for a verified backend-only build. Chat, like PaperTerm,
+is installed without remotely taking over the foreground application.
 
 The smoke test is read-only. It verifies exact installed content IDs, app
 resources, 100x100 icons, services, PaperTerm's offline backend self-test, and

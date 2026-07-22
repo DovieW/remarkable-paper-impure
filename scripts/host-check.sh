@@ -31,12 +31,17 @@ for (const path of [
   "config/compatibility.json",
   "src/paperboard/packaging/manifest.json",
   "src/paperterm/packaging/manifest.json",
+  "src/chat/packaging/manifest.json",
 ]) JSON.parse(fs.readFileSync(path, "utf8"));
 const compatibility = JSON.parse(fs.readFileSync("config/compatibility.json", "utf8"));
 if (!compatibility.approved_os || !Object.keys(compatibility.approved_os).length) {
   throw new Error("no approved OS release");
 }
-for (const path of ["src/paperboard/packaging/icon.svg", "src/paperterm/packaging/icon.svg"]) {
+for (const path of [
+  "src/paperboard/packaging/icon.svg",
+  "src/paperterm/packaging/icon.svg",
+  "src/chat/packaging/icon.svg",
+]) {
   const svg = fs.readFileSync(path, "utf8");
   if (!svg.includes('<svg') || !svg.includes('viewBox="0 0 100 100"')) {
     throw new Error(`${path} is not a 100x100 SVG source`);
@@ -59,7 +64,11 @@ if [[ "${#xovi_start_callers[@]}" -ne 1 \
 fi
 grep -Fq 'restart-appload-runtime.sh' scripts/deploy-paperboard.sh
 grep -Fq 'restart-appload-runtime.sh' scripts/deploy-paperterm.sh
+grep -Fq 'restart-appload-runtime.sh' scripts/deploy-chat.sh
 grep -Fq 'verify-appload-runtime.sh' scripts/deployment-summary.sh
+grep -Fq "backend/entry /tmp/chat.sock" scripts/tablet-companion.sh
+grep -Fq "backend/entry /tmp/chat.sock" scripts/install-paperboard-tablet-control.sh
+grep -Fq 'for socket in paperboard canvas paperterm chat' scripts/install-paperboard-tablet-control.sh
 grep -Fq '/home/root/xovi/scripts/post-start/50-paperboard-private-ssh.sh' \
   scripts/install-paperboard-tailscale-service.sh
 grep -Fq 'paperboard-tailscale-health.timer' deploy/tablet/paperboard-private-ssh-activate.sh

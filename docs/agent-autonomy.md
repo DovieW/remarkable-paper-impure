@@ -127,7 +127,7 @@ scripts/verify-appload-runtime.sh --host remarkable-usb
 
 Do not batch a second change behind an unverified first change. The check must
 confirm that `xochitl` is active through Xovi, the Xovi message broker exists,
-Paperboard and PaperTerm remain registered under AppLoad, and `/` remains
-read-only. A copied bundle or successful backend self-test is not sufficient.
-Xovi/AppLoad restarts require physical USB so that Wi-Fi or Tailscale failure
-cannot remove the repair path.
+Paperboard, PaperTerm, and Chat remain registered under AppLoad, and `/`
+remains read-only. A copied bundle or successful backend self-test is not
+sufficient. Xovi/AppLoad restarts require physical USB so that Wi-Fi or
+Tailscale failure cannot remove the repair path.

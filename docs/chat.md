@@ -2,7 +2,7 @@
 
 Chat is a native, landscape-first Paper Pure client for private OpenClaw
 conversations. It is a separate AppLoad application; it does not replace the
-stock notebook UI, Paperboard, Canvas, or PaperTerm.
+stock notebook UI, Paperboard (including Screen), or PaperTerm.
 
 ## Behavior
 

@@ -13,7 +13,7 @@ usage() {
   cat <<'EOF'
 Verify one installed tablet app and print a non-sensitive deployment report.
 
-Usage: deployment-summary.sh --app paperboard|paperterm --release ID --os VERSION
+Usage: deployment-summary.sh --app paperboard|paperterm|chat --release ID --os VERSION
                              --activation STATE [--host HOST]
 EOF
 }
@@ -32,7 +32,8 @@ while (($#)); do
   esac
 done
 
-[[ "$app" == paperboard || "$app" == paperterm ]] || die "--app must be paperboard or paperterm"
+[[ "$app" == paperboard || "$app" == paperterm || "$app" == chat ]] || \
+  die "--app must be paperboard, paperterm, or chat"
 [[ "$release" =~ ^[0-9a-f]{16}$ ]] || die "--release must be a 16-character content ID"
 [[ -n "$os_version" && -n "$activation" ]] || die "--os and --activation are required"
 

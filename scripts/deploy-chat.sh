@@ -42,3 +42,5 @@ trap - EXIT
 if $restart; then "$ROOT/scripts/restart-appload-runtime.sh" --host "$host"; fi
 "$ROOT/scripts/verify-appload-runtime.sh" --host "$host"
 printf 'Chat deployed. Select Chat from AppLoad.\n'
+"$ROOT/scripts/deployment-summary.sh" --host "$host" --app chat \
+  --release "$release" --os "$image_version" --activation physical-only
